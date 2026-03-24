@@ -102,6 +102,12 @@ export function ProjectDetail() {
           description="Intégration prête à accueillir les fichiers finaux."
         />
         <MediaGallery items={project.media} />
+        {project.slug === "ceremap3d-signalisation-bordeaux" && (
+          <p className="muted" style={{ marginTop: 12 }}>
+            Ces animations ont été générées avec AutoCAD Civil 3D à partir des données CeremaP3D
+            interprétées par TCP.
+          </p>
+        )}
       </section>
 
       {project.media.some((m) => m.type === "3d") && (

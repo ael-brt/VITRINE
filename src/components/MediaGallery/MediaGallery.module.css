@@ -16,6 +16,7 @@
   text-align: center;
   color: var(--color-deep);
   font-weight: 700;
+  cursor: pointer;
 }
 
 .item img {

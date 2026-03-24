@@ -116,8 +116,8 @@ export const projects: Project[] = [
     ],
     tags: ["3D", "Mobilité", "Signalisation", "Data terrain"],
     media: [
-      { type: "image", title: "Photo du camion de collecte" },
-      { type: "3d", title: "Aperçu visualisateur 3D" },
+      { type: "image", title: "Animation Aperçu", src: "/animation.gif" },
+      { type: "image", title: "GIF Visualisateur", src: "/2026-03-24-14-02-02.gif" },
     ],
     technologies: ["Cesium / Three.js", "React", "Data pipeline"],
     heroImage: "/imageceremap3d.jpg",

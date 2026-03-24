@@ -6,6 +6,7 @@ import { ProjectDetail } from "./pages/ProjectDetail";
 import { Showcase } from "./pages/Showcase";
 import { Quiz } from "./pages/Expertise";
 import { Contact } from "./pages/Contact";
+import { Process } from "./pages/Process";
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Route path="/projets" element={<Projects />} />
         <Route path="/projets/:slug" element={<ProjectDetail />} />
         <Route path="/showcase" element={<Showcase />} />
+        <Route path="/process" element={<Process />} />
         <Route path="/quiz" element={<Quiz />} />
         <Route path="/contact" element={<Contact />} />
       </Routes>
