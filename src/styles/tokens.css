@@ -1,0 +1,49 @@
+/* Design tokens inspirés de la charte Cerema */
+:root {
+  /* Couleurs principales */
+  --color-primary: #ef7d00; /* Orange Cerema */
+  --color-primary-strong: #d66f00;
+  --color-secondary: #2f8f6a; /* Vert Cerema */
+  --color-accent: #2f8f6a;
+  --color-deep: #1f2a33;
+  --color-surface: #f4f6f8;
+  --color-card: #ffffff;
+  --color-border: #dce2ea;
+  --color-text: #1e2430;
+  --color-text-muted: #4d5a6a;
+
+  /* Effets */
+  --shadow-soft: 0 10px 35px rgba(0, 0, 0, 0.08);
+  --radius-s: 8px;
+  --radius-m: 14px;
+  --radius-l: 22px;
+
+  /* Typography */
+  --font-heading: "Work Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-body: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --size-xs: 12px;
+  --size-s: 14px;
+  --size-m: 16px;
+  --size-l: 18px;
+  --size-xl: 24px;
+  --size-xxl: 34px;
+
+  /* Spacing */
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-14: 56px;
+  --space-16: 64px;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --size-xxl: 28px;
+    --size-xl: 21px;
+  }
+}

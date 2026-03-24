@@ -1,0 +1,25 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+}
+
+.tile {
+  padding: var(--space-5);
+  border-radius: var(--radius-m);
+  border: 1px solid var(--color-border);
+  background: white;
+  box-shadow: var(--shadow-soft);
+}
+
+.value {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-deep);
+  letter-spacing: -0.02em;
+}
+
+.label {
+  color: var(--color-text-muted);
+  margin-top: var(--space-2);
+}

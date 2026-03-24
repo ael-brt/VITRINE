@@ -1,0 +1,29 @@
+.shell {
+  background: var(--color-deep);
+  color: white;
+  padding: var(--space-12) 0;
+  margin-top: var(--space-16);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-6);
+}
+
+.title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--space-4);
+}
+
+.muted {
+  color: rgba(255, 255, 255, 0.78);
+  line-height: 1.6;
+}
+
+.legal {
+  margin-top: var(--space-8);
+  font-size: var(--size-s);
+  color: rgba(255, 255, 255, 0.65);
+}

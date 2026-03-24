@@ -1,0 +1,39 @@
+.shell {
+  margin-top: var(--space-6);
+  border-radius: var(--radius-l);
+  border: 1px solid var(--color-border);
+  background: linear-gradient(135deg, rgba(62, 142, 109, 0.12), rgba(47, 72, 88, 0.14));
+  overflow: hidden;
+  box-shadow: var(--shadow-soft);
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-4);
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.viewport {
+  height: 340px;
+  display: grid;
+  place-items: center;
+  color: var(--color-deep);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: radial-gradient(circle at 30% 30%, rgba(239, 125, 0, 0.22), transparent 55%),
+    radial-gradient(circle at 70% 70%, rgba(62, 142, 109, 0.25), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(246, 247, 248, 0.9));
+}
+
+.cta {
+  background: var(--color-deep);
+  color: white;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}

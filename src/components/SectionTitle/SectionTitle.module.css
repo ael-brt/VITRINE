@@ -1,0 +1,20 @@
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+
+.title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: var(--size-xl);
+  letter-spacing: -0.01em;
+  color: var(--color-deep);
+}
+
+.description {
+  color: var(--color-text-muted);
+  max-width: 720px;
+  line-height: 1.6;
+}
