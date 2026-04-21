@@ -1,0 +1,131 @@
+[
+  {
+    "model": "projects.project",
+    "pk": 1,
+    "fields": {
+      "slug": "noisy-le-grand-prospective-scolaire",
+      "title": "Noisy-le-Grand - Prospective scolaire",
+      "summary": "Jumeau numerique pour anticiper les effectifs scolaires, equilibrer la carte et simuler les besoins a 10 ans.",
+      "domain": "Jumeau numerique urbain",
+      "location": "Noisy-le-Grand",
+      "role": "Pilotage Cerema + equipe jumeaux numeriques",
+      "context": "Croissance demographique et reequilibrage des etablissements a planifier.",
+      "hero_image": "/imagenoisy.jpg",
+      "technologies": ["Data science", "Cartographie interactive", "React"],
+      "tags": ["Education", "Prospective", "Simulation", "Data"],
+      "contribution": ["Co-conception avec la collectivite", "Modelisation des scenarios et UX data", "Integration front et visualisation carto"],
+      "solution": ["Modelisation des scenarios a 10 ans par quartier", "Prediction des effectifs par etablissement", "Visualisation interactive des desequilibres", "Recommandations d'ajustement de la carte scolaire"],
+      "impacts": ["Decisions objectivees pour les elus", "Anticipation des pics de capacite", "Dialogue simplifie avec l'Education nationale"],
+      "created_at": "2026-01-01T10:00:00Z",
+      "updated_at": "2026-01-01T10:00:00Z"
+    }
+  },
+  {
+    "model": "projects.project",
+    "pk": 2,
+    "fields": {
+      "slug": "paris-petit-tertiaire-energie",
+      "title": "Ville de Paris - Consommation energetique du petit tertiaire",
+      "summary": "Plateforme de visualisation des consommations electricite et gaz du petit tertiaire, multi-echelles.",
+      "domain": "Transition energetique",
+      "location": "Paris",
+      "role": "Data viz et dashboards energie",
+      "context": "Orienter les politiques publiques de transition energetique sur les filieres les plus energivores.",
+      "hero_image": "/imageparis.jpg",
+      "technologies": ["React", "Map/Deck.gl", "API energie"],
+      "tags": ["Energie", "Donnees territoriales", "Dashboard"],
+      "contribution": ["Design des indicateurs et filtres multi-echelles", "Integration cartographique et dashboards", "Conseil sur la lisibilite des KPIs publics"],
+      "solution": ["Tableaux de bord cartographiques multi-echelles", "Indicateurs par filiere et intensite energetique", "Comparaison spatio-temporelle et filtres avances"],
+      "impacts": ["Ciblage des zones a fort potentiel de reduction", "Pilotage des aides et investissements", "Sensibilisation des acteurs locaux"],
+      "created_at": "2026-01-01T10:00:00Z",
+      "updated_at": "2026-01-01T10:00:00Z"
+    }
+  },
+  {
+    "model": "projects.project",
+    "pk": 3,
+    "fields": {
+      "slug": "ceremap3d-signalisation-bordeaux",
+      "title": "CereMap3D - Signalisation verticale a Bordeaux",
+      "summary": "Plateforme 3D de collecte, traitement et visualisation des panneaux de signalisation.",
+      "domain": "Jumeau 3D / Mobilite",
+      "location": "Bordeaux",
+      "role": "Integration 3D et pipeline data terrain",
+      "context": "Valoriser les donnees terrain issues d'un vehicule de collecte pour fiabiliser l'inventaire de signalisation.",
+      "hero_image": "/imageceremap3d.jpg",
+      "technologies": ["Cesium / Three.js", "React", "Data pipeline"],
+      "tags": ["3D", "Mobilite", "Signalisation", "Data terrain"],
+      "contribution": ["Structuration du pipeline collecte > traitement > restitution", "UX 3D (camera guidee, filtres typologies)", "Optimisation performance pour le web"],
+      "solution": ["Pipeline de collecte > traitement > restitution 3D", "Visualisateur 3D avec camera guidee", "Filtres par typologie de panneaux et etat"],
+      "impacts": ["Suivi qualite du patrimoine de signalisation", "Aide a la planification des interventions", "Reduction des tournees de reperage"],
+      "created_at": "2026-01-01T10:00:00Z",
+      "updated_at": "2026-01-01T10:00:00Z"
+    }
+  },
+  {
+    "model": "projects.projectmedia",
+    "pk": 1,
+    "fields": {
+      "project": 1,
+      "media_type": "image",
+      "title": "Vue 3D Noisy-le-Grand",
+      "src": "/Image 1 noisy le grand.png",
+      "sort_order": 1
+    }
+  },
+  {
+    "model": "projects.projectmedia",
+    "pk": 2,
+    "fields": {
+      "project": 1,
+      "media_type": "image",
+      "title": "Simulation scolaire",
+      "src": "/Image 2 noisy .png",
+      "sort_order": 2
+    }
+  },
+  {
+    "model": "projects.projectmedia",
+    "pk": 3,
+    "fields": {
+      "project": 2,
+      "media_type": "image",
+      "title": "Dashboard consommation (kWh)",
+      "src": "/Image 1 Paris conso(kwh).png",
+      "sort_order": 1
+    }
+  },
+  {
+    "model": "projects.projectmedia",
+    "pk": 4,
+    "fields": {
+      "project": 2,
+      "media_type": "image",
+      "title": "Performance energetique",
+      "src": "/Image 2 Paris performence énergétique.png",
+      "sort_order": 2
+    }
+  },
+  {
+    "model": "projects.projectmedia",
+    "pk": 5,
+    "fields": {
+      "project": 3,
+      "media_type": "image",
+      "title": "Animation Apercu",
+      "src": "/animation.gif",
+      "sort_order": 1
+    }
+  },
+  {
+    "model": "projects.projectmedia",
+    "pk": 6,
+    "fields": {
+      "project": 3,
+      "media_type": "image",
+      "title": "GIF Visualisateur",
+      "src": "/2026-03-24-14-02-02.gif",
+      "sort_order": 2
+    }
+  }
+]

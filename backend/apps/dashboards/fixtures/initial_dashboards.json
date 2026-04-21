@@ -1,0 +1,65 @@
+[
+  {
+    "model": "dashboards.tenant",
+    "pk": 1,
+    "fields": {
+      "slug": "floatingcardata",
+      "name": "Tenant floatingcardata",
+      "description": "Tenant source pour les dashboards FloatingCarData.",
+      "is_active": true
+    }
+  },
+  {
+    "model": "dashboards.tenant",
+    "pk": 2,
+    "fields": {
+      "slug": "secteurscolaire",
+      "name": "Tenant secteurscolaire",
+      "description": "Tenant source pour les dashboards secteurs scolaires.",
+      "is_active": true
+    }
+  },
+  {
+    "model": "dashboards.tenant",
+    "pk": 3,
+    "fields": {
+      "slug": "ceremap3d",
+      "name": "Tenant ceremap3d",
+      "description": "Tenant source pour les dashboards Ceremap3d.",
+      "is_active": true
+    }
+  },
+  {
+    "model": "dashboards.dashboard",
+    "pk": 1,
+    "fields": {
+      "tenant": 1,
+      "slug": "floatingcardata",
+      "title": "Dashboard floatingcardata",
+      "description": "Vue metier pour les troncons routiers, la mobilite et la densite de circulation.",
+      "is_protected": true
+    }
+  },
+  {
+    "model": "dashboards.dashboard",
+    "pk": 2,
+    "fields": {
+      "tenant": 2,
+      "slug": "secteurscolaire",
+      "title": "Dashboard secteurscolaire",
+      "description": "Vue metier pour la planification scolaire, les capacites et l'equilibrage territorial des effectifs.",
+      "is_protected": true
+    }
+  },
+  {
+    "model": "dashboards.dashboard",
+    "pk": 3,
+    "fields": {
+      "tenant": 3,
+      "slug": "ceremap3d",
+      "title": "Dashboard ceremap3d",
+      "description": "Vue metier 3D pour visualisation des actifs et analyses geospatiales multi-types.",
+      "is_protected": true
+    }
+  }
+]

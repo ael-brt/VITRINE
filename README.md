@@ -1,73 +1,63 @@
-# React + TypeScript + Vite
+# Vitrine Monorepo
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Repository layout:
 
-Currently, two official plugins are available:
+- `frontend/`: React + Vite application
+- `backend/`: Django + DRF API
+- `docs/`: architecture and team split notes
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Run backend
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py loaddata apps/dashboards/fixtures/initial_dashboards.json
+python manage.py loaddata apps/projects/fixtures/initial_projects.json
+python manage.py createsuperuser
+python manage.py runserver
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Backend API base URL: `http://127.0.0.1:8000/api/v1/`
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Optional data stack (phase 1)
+Backend now supports:
+- PostgreSQL + PostGIS (`DB_ENGINE=postgis`)
+- Redis cache (`USE_REDIS_CACHE=true`)
+- Celery worker (`celery -A config worker -l info`)
+- Local services bootstrap: `docker compose -f backend/docker-compose.stack.yml up -d`
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Run frontend
+
+```powershell
+cd frontend
+npm install
+npm run dev
 ```
+
+Frontend URL: `http://localhost:5173`
+
+The frontend consumes the backend API through:
+
+- `GET /api/v1/projects/`
+- `GET /api/v1/projects/{slug}/`
+- `GET /api/v1/dashboards/`
+- `GET /api/v1/dashboards/{slug}/`
+- `GET /api/v1/dashboards/{slug}/data/`
+- `GET /api/v1/dashboards/{slug}/map/`
+- `GET /api/v1/dashboards/{slug}/kpis/`
+- `GET /api/v1/dashboards/{slug}/timeseries/`
+- `GET /api/v1/geodata/segments/`
+
+Authentication now uses Django token endpoints:
+
+- `POST /api/v1/accounts/login/`
+- `POST /api/v1/accounts/logout/`
+- `GET /api/v1/accounts/me/`
+
+For local dev, Vite proxies `/api` to `http://127.0.0.1:8000`.
+
+NGSI-LD access is centralized in backend (`apps/ngsild`) and configured in `backend/.env.example`.
+Per-dashboard tenant/source overrides are managed in Django admin via `Dashboard NGSI-LD sources`.

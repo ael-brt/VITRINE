@@ -1,0 +1,125 @@
+.page {
+  padding: 72px 0;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.08;
+  font-family: var(--font-heading);
+  color: var(--color-deep);
+}
+
+.subtitle {
+  margin: 10px 0 0;
+  color: var(--color-text-muted);
+  max-width: 740px;
+  line-height: 1.65;
+}
+
+.logout {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.grid {
+  margin-top: 22px;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+}
+
+.card {
+  position: relative;
+  border-radius: 24px;
+  border: 1px solid rgba(31, 42, 51, 0.12);
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 16px 36px rgba(31, 42, 51, 0.1);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 28px 50px rgba(31, 42, 51, 0.16);
+}
+
+.visual {
+  height: 190px;
+  border-bottom: 1px solid rgba(31, 42, 51, 0.1);
+  background:
+    radial-gradient(circle at 16% 16%, rgba(255, 255, 255, 0.26), transparent 36%),
+    linear-gradient(145deg, #2f8f6a 0%, #1f2a33 52%, #ef7d00 100%);
+  position: relative;
+}
+
+.visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.12) 0,
+      rgba(255, 255, 255, 0.12) 1px,
+      transparent 1px,
+      transparent 52px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.12) 0,
+      rgba(255, 255, 255, 0.12) 1px,
+      transparent 1px,
+      transparent 52px
+    );
+}
+
+.content {
+  padding: 18px 18px 20px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(47, 143, 106, 0.12);
+  color: var(--color-deep);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.cardTitle {
+  margin: 10px 0 8px;
+  font-size: 22px;
+  font-family: var(--font-heading);
+  color: var(--color-deep);
+}
+
+.description {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.58;
+}
+
+.cta {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--color-primary-strong);
+}
