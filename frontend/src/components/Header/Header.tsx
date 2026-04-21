@@ -13,7 +13,7 @@ export function Header() {
     { label: "Methode", to: "/process" },
     { label: "Quiz", to: "/quiz" },
     authenticated
-      ? { label: "Dashboard", to: "/welcome" }
+      ? { label: "Dashboard", to: "/dashboardhome" }
       : { label: "Connexion", to: "/connexion" },
   ];
 

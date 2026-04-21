@@ -82,7 +82,7 @@ export function Welcome() {
     <div className={`container ${styles.page}`}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Welcome dashboards</h1>
+          <h1 className={styles.title}>Dashboard Home</h1>
           <p className={styles.subtitle}>
             Choisissez une carte pour ouvrir le tableau de bord associe. Les
             pages sont reservees a l'espace connecte.

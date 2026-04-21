@@ -49,3 +49,36 @@ export type DashboardData = {
   };
   sampleIds: string[];
 };
+
+export type DashboardMapItem = {
+  id: string;
+  type: string;
+  tenant: string;
+  joinKey: string;
+  scope: string;
+  geometry: unknown;
+};
+
+export type DashboardMapData = {
+  dashboardSlug: string;
+  entityType: string | null;
+  tenant: string | null;
+  joinKey: string | null;
+  page: number;
+  pageSize: number;
+  totalRows: number;
+  totalItems: number;
+  items: DashboardMapItem[];
+};
+
+export type DashboardKpisData = {
+  dashboardSlug: string;
+  entityType: string | null;
+  tenant: string | null;
+  totalEntities: number;
+  withJoinKey: number;
+  withTenant: number;
+  withNgsiUpdatedAt: number;
+  latestNgsiUpdatedAt: string | null;
+  countsByType: Array<{ entityType: string; count: number }>;
+};

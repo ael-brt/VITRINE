@@ -58,7 +58,9 @@ export function DashboardSecteurScolaire() {
           <p className={styles.description}>{description}</p>
           {error ? <p className="muted">{error}</p> : null}
         </div>
-        <button className={styles.back} onClick={() => navigate("/welcome")}>Retour a welcome</button>
+        <button className={styles.back} onClick={() => navigate("/dashboardhome")}>
+          Retour au dashboard home
+        </button>
       </div>
 
       <div className={styles.stats}>

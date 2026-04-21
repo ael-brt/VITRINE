@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchDashboardBySlug, fetchDashboardData } from "../api/client";
+import { fetchDashboardBySlug, fetchDashboardKpis, fetchDashboardMap } from "../api/client";
 import styles from "./Dashboard.module.css";
 
-const DEFAULT_TITLE = "Dashboard floatingcardata";
+const DEFAULT_TITLE = "Dashboard ceremap3d";
 const DEFAULT_DESCRIPTION =
-  "Vue metier pour les troncons routiers, la mobilite et la densite de circulation.";
+  "Vue metier pour le suivi des panneaux de signalisation et des indicateurs Ceremap3D.";
 
-export function DashboardFloatingCarData() {
+export function DashboardCeremap3D() {
   const navigate = useNavigate();
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [description, setDescription] = useState(DEFAULT_DESCRIPTION);
-  const [segmentsCount, setSegmentsCount] = useState<number>(0);
-  const [lineCount, setLineCount] = useState<number>(0);
-  const [pointCount, setPointCount] = useState<number>(0);
+  const [totalPanneaux, setTotalPanneaux] = useState(0);
+  const [mappedPanneaux, setMappedPanneaux] = useState(0);
+  const [withJoinKey, setWithJoinKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -21,17 +21,20 @@ export function DashboardFloatingCarData() {
 
     async function load() {
       try {
-        const [dashboard, segments] = await Promise.all([
-          fetchDashboardBySlug("floatingcardata"),
-          fetchDashboardData("floatingcardata"),
+        const [dashboard, kpis, map] = await Promise.all([
+          fetchDashboardBySlug("ceremap3d"),
+          fetchDashboardKpis("ceremap3d", { type: "Panneau" }),
+          fetchDashboardMap("ceremap3d", { type: "Panneau", page: 1, pageSize: 500 }),
         ]);
+
+        const mappable = map.items.filter((item) => item.geometry !== null).length;
 
         if (!cancelled) {
           setTitle(dashboard.title || DEFAULT_TITLE);
           setDescription(dashboard.description || DEFAULT_DESCRIPTION);
-          setSegmentsCount(segments.totalEntities);
-          setLineCount(segments.stats.lineCount);
-          setPointCount(segments.stats.pointCount);
+          setTotalPanneaux(kpis.totalEntities);
+          setMappedPanneaux(mappable);
+          setWithJoinKey(kpis.withJoinKey);
           setError(null);
         }
       } catch (caughtError) {
@@ -39,7 +42,7 @@ export function DashboardFloatingCarData() {
           setError(
             caughtError instanceof Error
               ? caughtError.message
-              : "Impossible de charger le dashboard depuis l'API.",
+              : "Impossible de charger le dashboard ceremap3d depuis l'API.",
           );
         }
       }
@@ -67,23 +70,23 @@ export function DashboardFloatingCarData() {
 
       <div className={styles.stats}>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{segmentsCount}</span>
-          <div className={styles.statLabel}>entites troncons</div>
+          <span className={styles.statValue}>{totalPanneaux}</span>
+          <div className={styles.statLabel}>panneaux total</div>
         </article>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{lineCount}</span>
-          <div className={styles.statLabel}>troncons lineaires</div>
+          <span className={styles.statValue}>{mappedPanneaux}</span>
+          <div className={styles.statLabel}>panneaux avec geometrie</div>
         </article>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{pointCount}</span>
-          <div className={styles.statLabel}>points geolocalises</div>
+          <span className={styles.statValue}>{withJoinKey}</span>
+          <div className={styles.statLabel}>panneaux avec cle de jointure</div>
         </article>
       </div>
 
       <div className={styles.surface}>
         <div className={styles.map}>
           <div className={styles.mapLabel}>
-            Carte floatingcardata
+            Carte Ceremap3D - Panneau
             <br />
             (zone de visualisation du dashboard)
           </div>

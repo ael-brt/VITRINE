@@ -12,7 +12,7 @@ export function Login() {
   const [loading, setLoading] = useState(false);
 
   if (isAuthenticated()) {
-    return <Navigate to="/welcome" replace />;
+    return <Navigate to="/dashboardhome" replace />;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -26,7 +26,7 @@ export function Login() {
       return;
     }
 
-    navigate("/welcome", { replace: true });
+    navigate("/dashboardhome", { replace: true });
   }
 
   return (

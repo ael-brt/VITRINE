@@ -15,6 +15,7 @@ import { Login } from "./pages/Login";
 import { Welcome } from "./pages/Welcome";
 import { DashboardFloatingCarData } from "./pages/DashboardFloatingCarData";
 import { DashboardSecteurScolaire } from "./pages/DashboardSecteurScolaire";
+import { DashboardCeremap3D } from "./pages/DashboardCeremap3D";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const [isValidating, setIsValidating] = useState(true);
@@ -64,8 +65,9 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/home" element={<Navigate to="/" replace />} />
         <Route path="/connexion" element={<Login />} />
+        <Route path="/welcome" element={<Navigate to="/dashboardhome" replace />} />
         <Route
-          path="/welcome"
+          path="/dashboardhome"
           element={
             <ProtectedRoute>
               <Welcome />
@@ -89,30 +91,17 @@ function App() {
           }
         />
         <Route
-          path="/projets"
+          path="/dashboards/ceremap3d"
           element={
             <ProtectedRoute>
-              <Projects />
+              <DashboardCeremap3D />
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/projets/:slug"
-          element={
-            <ProtectedRoute>
-              <ProjectDetail />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/projets" element={<Projects />} />
+        <Route path="/projets/:slug" element={<ProjectDetail />} />
         <Route path="/showcase" element={<Showcase />} />
-        <Route
-          path="/carte"
-          element={
-            <ProtectedRoute>
-              <Map />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/carte" element={<Map />} />
         <Route path="/process" element={<Process />} />
         <Route path="/quiz" element={<Quiz />} />
         <Route path="/contact" element={<Contact />} />
