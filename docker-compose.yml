@@ -47,7 +47,7 @@ services:
       REDIS_URL: redis://redis:6379/1
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-127.0.0.1,localhost}
+      DJANGO_ALLOWED_HOSTS: 127.0.0.1,localhost,217.182.210.146
       INIT_FIXTURES: ${INIT_FIXTURES:-false}
     depends_on:
       postgres:
@@ -58,6 +58,8 @@ services:
       - backend_static:/app/staticfiles
     expose:
       - "8000"
+    ports:
+      - "18000:8000"
 
   celery-worker:
     build:
@@ -127,7 +129,7 @@ services:
       backend:
         condition: service_started
     ports:
-      - "80:80"
+      - "8080:80"
 
 volumes:
   pgdata:
