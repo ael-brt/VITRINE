@@ -31,6 +31,32 @@
   margin: 20px 0 26px;
 }
 
+.subTabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.subTabButton {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.subTabButtonActive {
+  background: rgba(62, 142, 109, 0.16);
+  color: var(--color-deep);
+}
+
 .search {
   width: 100%;
   border: 1px solid var(--color-border);
@@ -114,3 +140,41 @@
   border-color: #f0c3c3;
 }
 
+.graphFrame {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-m);
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+}
+
+.graphSvg {
+  width: 100%;
+  min-width: 960px;
+  display: block;
+}
+
+.edgeDefinition {
+  stroke: rgba(62, 142, 109, 0.4);
+  stroke-width: 1.2;
+}
+
+.edgeAlias {
+  stroke: rgba(110, 124, 150, 0.38);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.nodeTerm {
+  fill: #244b36;
+}
+
+.nodeUri {
+  fill: #2c4f7c;
+}
+
+.nodeLabel {
+  font-size: 10px;
+  fill: #1f2937;
+}
