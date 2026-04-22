@@ -16,6 +16,7 @@ import { Welcome } from "./pages/Welcome";
 import { DashboardFloatingCarData } from "./pages/DashboardFloatingCarData";
 import { DashboardSecteurScolaire } from "./pages/DashboardSecteurScolaire";
 import { DashboardCeremap3D } from "./pages/DashboardCeremap3D";
+import { ContextDefinitions } from "./pages/ContextDefinitions";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const [isValidating, setIsValidating] = useState(true);
@@ -101,6 +102,7 @@ function App() {
         <Route path="/projets" element={<Projects />} />
         <Route path="/projets/:slug" element={<ProjectDetail />} />
         <Route path="/showcase" element={<Showcase />} />
+        <Route path="/contextes" element={<ContextDefinitions />} />
         <Route path="/carte" element={<Map />} />
         <Route path="/process" element={<Process />} />
         <Route path="/quiz" element={<Quiz />} />

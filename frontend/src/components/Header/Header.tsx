@@ -10,6 +10,7 @@ export function Header() {
     { label: "Accueil", to: "/" },
     { label: "Realisations", to: "/projets" },
     { label: "Demonstrations", to: "/showcase" },
+    { label: "Contextes", to: "/contextes" },
     { label: "Methode", to: "/process" },
     { label: "Quiz", to: "/quiz" },
     authenticated
