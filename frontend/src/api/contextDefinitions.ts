@@ -3,7 +3,7 @@ const REPO_NAME = "ngsild-api-data-models";
 const REPO_BRANCH = "main";
 const TREE_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/git/trees/${REPO_BRANCH}?recursive=1`;
 const RAW_BASE_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/`;
-const CACHE_KEY = "vitrine.context-definitions.v2";
+const CACHE_KEY = "vitrine.context-definitions.v3";
 
 type JsonLdContextValue = string | { "@id"?: string } | null;
 
@@ -20,6 +20,7 @@ export type DefinitionItem = {
   term: string;
   uri: string;
   sourceFile: string;
+  isPrefixDeclaration: boolean;
 };
 
 export type GroupedDefinition = {
@@ -158,6 +159,68 @@ function uriNamespace(uri: string): string {
 }
 
 function uriLocalName(uri: string): string {
+  const normalized = uri.replace(/[\/#]+$/, "");
+  if (!normalized) {
+    return uri;
+  }
+  const hashIndex = normalized.lastIndexOf("#");
+  if (hashIndex >= 0) {
+    return normalized.slice(hashIndex + 1);
+  }
+  const slashIndex = normalized.lastIndexOf("/");
+  if (slashIndex >= 0) {
+    return normalized.slice(slashIndex + 1);
+  }
+  return normalized;
+}
+
+function titleCaseToken(value: string): string {
+  if (!value) {
+    return value;
+  }
+  return value[0].toUpperCase() + value.slice(1);
+}
+
+function deriveEntityLabel(item: DefinitionItem): string {
+  if (firstUppercase(item.term)) {
+    return item.term;
+  }
+  const local = uriLocalName(item.uri);
+  if (local) {
+    return titleCaseToken(local);
+  }
+  return titleCaseToken(item.term);
+}
+
+type EntityCandidate = {
+  term: string;
+  uri: string;
+  namespace: string;
+};
+
+function toEntityCandidate(item: DefinitionItem): EntityCandidate {
+  return {
+    term: deriveEntityLabel(item),
+    uri: item.uri,
+    namespace: item.isPrefixDeclaration ? item.uri : uriNamespace(item.uri),
+  };
+}
+
+function dedupeEntityCandidates(items: EntityCandidate[]): EntityCandidate[] {
+  const seen = new Set<string>();
+  const deduped: EntityCandidate[] = [];
+  for (const item of items) {
+    const key = `${item.namespace}||${item.term}||${item.uri}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+function uriLocalNameLegacy(uri: string): string {
   const hashIndex = uri.lastIndexOf("#");
   if (hashIndex >= 0) {
     return uri.slice(hashIndex + 1);
@@ -170,10 +233,13 @@ function uriLocalName(uri: string): string {
 }
 
 function detectEntityCandidate(item: DefinitionItem): boolean {
+  if (item.isPrefixDeclaration && classifyAsInternal(item.uri)) {
+    return true;
+  }
   if (firstUppercase(item.term)) {
     return true;
   }
-  return firstUppercase(uriLocalName(item.uri));
+  return firstUppercase(uriLocalNameLegacy(item.uri));
 }
 
 function groupDefinitions(items: DefinitionItem[]): GroupedDefinition[] {
@@ -271,6 +337,7 @@ function extractDefinitions(document: JsonLdDocument, sourceFile: string): Defin
         term: key,
         uri: candidate,
         sourceFile,
+        isPrefixDeclaration: typeof rawValue === "string" && isLikelyPrefix(rawValue),
       });
     }
   }
@@ -300,12 +367,17 @@ function buildInternalPropertyLinks(items: DefinitionItem[]): InternalPropertyLi
   const links: InternalPropertyLink[] = [];
 
   for (const [sourceFile, fileItems] of byFile.entries()) {
-    const entityCandidates = fileItems.filter((item) => detectEntityCandidate(item));
+    const entityCandidates = dedupeEntityCandidates(
+      fileItems.filter((item) => detectEntityCandidate(item)).map(toEntityCandidate),
+    );
     const entityFallbackTerm = fileStem(sourceFile);
     const entityFallbackUri = `context:${sourceFile}`;
 
     const internalProperties = fileItems.filter(
-      (item) => classifyAsInternal(item.uri) && !detectEntityCandidate(item),
+      (item) =>
+        classifyAsInternal(item.uri) &&
+        !item.isPrefixDeclaration &&
+        !detectEntityCandidate(item),
     );
 
     for (const property of internalProperties) {
@@ -314,8 +386,8 @@ function buildInternalPropertyLinks(items: DefinitionItem[]): InternalPropertyLi
         entityCandidates
           .slice()
           .sort((left, right) => {
-            const leftScore = uriNamespace(left.uri) === propertyNamespace ? 1 : 0;
-            const rightScore = uriNamespace(right.uri) === propertyNamespace ? 1 : 0;
+            const leftScore = left.namespace === propertyNamespace ? 1 : 0;
+            const rightScore = right.namespace === propertyNamespace ? 1 : 0;
             if (leftScore !== rightScore) {
               return rightScore - leftScore;
             }
