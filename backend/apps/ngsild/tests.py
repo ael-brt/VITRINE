@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from apps.dashboards.models import Dashboard, Tenant
 
+from .client import fetch_entities
 from .models import DashboardNgsiLdEntityType, DashboardNgsiLdSource, DashboardNgsiLdSyncJob
 from .service import get_dashboard_data
 from .sync import enqueue_due_sync_jobs, run_pending_sync_jobs, sync_source_now
@@ -174,3 +175,42 @@ class NgsiLdSyncTests(TestCase):
             .values_list("entity_id", flat=True)
         )
         self.assertEqual(ids, ["urn:ngsi-ld:Panneau:2"])
+
+
+class NgsiLdClientPaginationTests(TestCase):
+    @patch("apps.ngsild.client.fetch_access_token", return_value="token")
+    @patch("apps.ngsild.client._json_request")
+    def test_fetch_entities_uses_offset_fallback_when_no_next_link(self, mock_json_request, _mock_token):
+        mock_json_request.side_effect = [
+            ([
+                {"id": "urn:1"},
+                {"id": "urn:2"},
+                {"id": "urn:3"},
+            ], {}),
+            ([
+                {"id": "urn:4"},
+                {"id": "urn:5"},
+            ], {}),
+        ]
+
+        entities = fetch_entities(
+            entity_type="Panneau",
+            limit=5,
+            overrides={
+                "auth_url": "https://auth.example.test/token",
+                "client_id": "client-id",
+                "base_url": "https://api.example.test/ngsi-ld/v1",
+                "tenant": "urn:ngsi-ld:tenant:ceremap3d",
+                "page_limit": 3,
+            },
+        )
+
+        self.assertEqual([item["id"] for item in entities], ["urn:1", "urn:2", "urn:3", "urn:4", "urn:5"])
+        self.assertEqual(mock_json_request.call_count, 2)
+
+        first_call_url = mock_json_request.call_args_list[0].kwargs["url"]
+        second_call_url = mock_json_request.call_args_list[1].kwargs["url"]
+        self.assertIn("limit=3", first_call_url)
+        self.assertIn("offset=0", first_call_url)
+        self.assertIn("limit=3", second_call_url)
+        self.assertIn("offset=3", second_call_url)

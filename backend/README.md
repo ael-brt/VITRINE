@@ -100,6 +100,7 @@ Use `Dashboard NGSI-LD sources` in admin to configure tenant and source settings
 - Management commands:
   - `python manage.py schedule_ngsild_sync`
   - `python manage.py run_ngsild_sync_jobs --limit 20`
+- With Celery beat enabled, due jobs are enqueued and pending jobs processed automatically.
 
 ## Ingestion v1 (step 4)
 - Normalized storage table: `Dashboard NGSI-LD normalized entities`

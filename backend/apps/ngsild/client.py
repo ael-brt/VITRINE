@@ -2,6 +2,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from math import ceil
 from typing import Any
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
@@ -185,6 +186,20 @@ def _parse_next_link(link_header: str | None) -> str | None:
     return None
 
 
+def _resolve_page_limit(overrides: dict[str, str | int | None] | None, total_cap: int) -> int:
+    raw = None
+    if overrides and "page_limit" in overrides:
+        raw = overrides.get("page_limit")
+    if raw in (None, ""):
+        raw = _get_env("NGSILD_PAGE_LIMIT", "300")
+    try:
+        candidate = int(str(raw))
+    except Exception:
+        candidate = 300
+    # NGSI-LD providers often cap page size around 300.
+    return max(1, min(total_cap, candidate))
+
+
 def fetch_entities(
     entity_type: str,
     limit: int = 1000,
@@ -203,14 +218,19 @@ def fetch_entities(
         headers[settings.tenant_header] = settings.tenant
 
     # `limit` is treated as a global cap for returned entities.
-    # Keep per-page limit bounded and stop following pagination once cap is reached.
+    # Per-page fetch size can be configured (default 300) and pagination is handled
+    # by Link rel=next when provided, otherwise by offset fallback.
     total_cap = max(1, int(limit))
-    page_limit = min(total_cap, 1000)
-    params = urlencode({"type": entity_type, "limit": str(page_limit)})
+    page_limit = _resolve_page_limit(overrides, total_cap)
+    params = urlencode({"type": entity_type, "limit": str(page_limit), "offset": "0"})
     next_url = urljoin(settings.base_url, f"entities?{params}")
     entities: list[dict[str, Any]] = []
+    offset = 0
+    # Safety valve against buggy providers repeating the same page indefinitely.
+    max_pages = max(1, ceil(total_cap / page_limit) + 2)
+    pages_read = 0
 
-    while next_url and len(entities) < total_cap:
+    while next_url and len(entities) < total_cap and pages_read < max_pages:
         payload, response_headers = _json_request(
             method="GET",
             url=next_url,
@@ -218,7 +238,9 @@ def fetch_entities(
             body=None,
             timeout_seconds=settings.timeout_seconds,
         )
+        pages_read += 1
 
+        page_items: list[dict[str, Any]] = []
         if isinstance(payload, list):
             remaining = total_cap - len(entities)
             page_items = [item for item in payload if isinstance(item, dict)]
@@ -234,6 +256,16 @@ def fetch_entities(
         candidate = _parse_next_link(response_headers.get("link"))
         if candidate and not candidate.startswith("http"):
             candidate = urljoin(settings.base_url, candidate)
-        next_url = candidate
+        if candidate:
+            next_url = candidate
+            continue
+
+        # Fallback pagination by offset when provider does not emit rel=next.
+        # Stop once the page is not full.
+        if len(page_items) < page_limit:
+            break
+        offset += page_limit
+        next_params = urlencode({"type": entity_type, "limit": str(page_limit), "offset": str(offset)})
+        next_url = urljoin(settings.base_url, f"entities?{next_params}")
 
     return entities

@@ -147,3 +147,24 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_TASK_DEFAULT_QUEUE = os.getenv("CELERY_TASK_DEFAULT_QUEUE", "default")
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "600"))
+
+try:
+    NGSILD_SYNC_ENQUEUE_SECONDS = int(os.getenv("NGSILD_SYNC_ENQUEUE_SECONDS", "60"))
+except Exception:
+    NGSILD_SYNC_ENQUEUE_SECONDS = 60
+
+try:
+    NGSILD_SYNC_RUN_SECONDS = int(os.getenv("NGSILD_SYNC_RUN_SECONDS", "60"))
+except Exception:
+    NGSILD_SYNC_RUN_SECONDS = 60
+
+CELERY_BEAT_SCHEDULE = {
+    "ngsild-enqueue-due-sync-jobs": {
+        "task": "apps.ngsild.enqueue_due_sync_jobs_task",
+        "schedule": max(10, NGSILD_SYNC_ENQUEUE_SECONDS),
+    },
+    "ngsild-run-pending-sync-jobs": {
+        "task": "apps.ngsild.run_pending_sync_jobs_task",
+        "schedule": max(10, NGSILD_SYNC_RUN_SECONDS),
+    },
+}
