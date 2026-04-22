@@ -3,6 +3,7 @@ import {
   fetchContextDefinitions,
   type ContextDefinitionsResult,
   type GroupedDefinition,
+  type InternalPropertyLink,
 } from "../api/contextDefinitions";
 import styles from "./ContextDefinitions.module.css";
 
@@ -25,19 +26,37 @@ function filterDefinitions(items: GroupedDefinition[], query: string): GroupedDe
   });
 }
 
+function filterPropertyLinks(items: InternalPropertyLink[], query: string): InternalPropertyLink[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return items;
+  }
+
+  return items.filter((item) => {
+    return (
+      item.term.toLowerCase().includes(normalizedQuery) ||
+      item.uri.toLowerCase().includes(normalizedQuery) ||
+      item.entityTerm.toLowerCase().includes(normalizedQuery) ||
+      item.entityUri.toLowerCase().includes(normalizedQuery) ||
+      item.sourceFile.toLowerCase().includes(normalizedQuery)
+    );
+  });
+}
+
 type GraphNode = {
   id: string;
   label: string;
+  subtitle?: string;
   x: number;
   y: number;
-  kind: "term" | "uri";
+  kind: "property" | "entity" | "file";
 };
 
 type GraphEdge = {
   id: string;
   source: string;
   target: string;
-  kind: "definition" | "alias";
+  relation: "domaine" | "contenue";
 };
 
 type GraphModel = {
@@ -55,123 +74,103 @@ function ellipsis(value: string, maxLength: number): string {
   return `${value.slice(0, Math.max(0, maxLength - 1))}...`;
 }
 
-function buildGraphModel(items: GroupedDefinition[]): GraphModel {
-  const maxTerms = 220;
-  const termToUris = new Map<string, Set<string>>();
-  const termEntries: Array<{ term: string; uri: string }> = [];
+function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
+  const maxProperties = 180;
+  const selected = items.slice(0, maxProperties);
+  const truncated = items.length > maxProperties;
 
-  for (const item of items) {
-    for (const term of item.terms) {
-      if (!termToUris.has(term)) {
-        termToUris.set(term, new Set<string>());
-      }
-      const uris = termToUris.get(term);
-      if (!uris) {
-        continue;
-      }
-      uris.add(item.uri);
-      termEntries.push({ term, uri: item.uri });
-    }
-  }
-
-  const sortedTerms = Array.from(termToUris.keys()).sort((left, right) =>
-    left.localeCompare(right),
-  );
-  const selectedTerms = sortedTerms.slice(0, maxTerms);
-  const selectedTermSet = new Set(selectedTerms);
-  const selectedUris = new Set<string>();
-  for (const term of selectedTerms) {
-    const uris = termToUris.get(term);
-    if (!uris) {
-      continue;
-    }
-    for (const uri of uris) {
-      selectedUris.add(uri);
-    }
-  }
-
-  const termList = Array.from(selectedTerms);
-  const uriList = Array.from(selectedUris).sort((left, right) => left.localeCompare(right));
-
-  const termSpacing = 34;
-  const uriSpacing = 34;
-  const basePadding = 42;
-  const contentRows = Math.max(termList.length, uriList.length, 1);
-  const height = basePadding * 2 + contentRows * Math.max(termSpacing, uriSpacing);
-  const width = 1480;
-  const termX = 260;
-  const uriX = 1210;
-
-  const nodes: GraphNode[] = [];
-  const nodeIndex = new Map<string, GraphNode>();
-
-  for (let index = 0; index < termList.length; index += 1) {
-    const term = termList[index];
-    const node: GraphNode = {
-      id: `term:${term}`,
-      label: term,
-      kind: "term",
-      x: termX,
-      y: basePadding + (index + 1) * termSpacing,
-    };
-    nodes.push(node);
-    nodeIndex.set(node.id, node);
-  }
-
-  for (let index = 0; index < uriList.length; index += 1) {
-    const uri = uriList[index];
-    const node: GraphNode = {
-      id: `uri:${uri}`,
-      label: ellipsis(uri, 68),
-      kind: "uri",
-      x: uriX,
-      y: basePadding + (index + 1) * uriSpacing,
-    };
-    nodes.push(node);
-    nodeIndex.set(node.id, node);
-  }
-
+  const fileIds = new Map<string, GraphNode>();
+  const entityIds = new Map<string, GraphNode>();
+  const propertyIds = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
-  for (const entry of termEntries) {
-    if (!selectedTermSet.has(entry.term) || !selectedUris.has(entry.uri)) {
-      continue;
-    }
-    edges.push({
-      id: `def:${entry.term}->${entry.uri}`,
-      source: `term:${entry.term}`,
-      target: `uri:${entry.uri}`,
-      kind: "definition",
-    });
-  }
 
-  for (const item of items) {
-    const terms = item.terms.filter((term) => selectedTermSet.has(term));
-    if (terms.length < 2) {
-      continue;
-    }
-    for (let index = 0; index < terms.length - 1; index += 1) {
-      const source = terms[index];
-      const target = terms[index + 1];
+  const files = Array.from(new Set(selected.map((item) => item.sourceFile))).sort((a, b) =>
+    a.localeCompare(b),
+  );
+
+  const entities = Array.from(
+    new Set(selected.map((item) => `${item.sourceFile}||${item.entityTerm}||${item.entityUri}`)),
+  ).sort((a, b) => a.localeCompare(b));
+
+  const fileX = 170;
+  const entityX = 740;
+  const propertyX = 1310;
+  const fileSpacing = 54;
+  const entitySpacing = 38;
+  const propertySpacing = 34;
+  const basePadding = 36;
+  const rows = Math.max(files.length + 1, entities.length + 1, selected.length + 1, 8);
+  const height = basePadding * 2 + rows * 40;
+  const width = 1600;
+
+  files.forEach((file, index) => {
+    fileIds.set(file, {
+      id: `file:${file}`,
+      label: ellipsis(file, 40),
+      x: fileX,
+      y: basePadding + (index + 1) * fileSpacing,
+      kind: "file",
+    });
+  });
+
+  entities.forEach((entityKey, index) => {
+    const [sourceFile, entityTerm, entityUri] = entityKey.split("||");
+    const node: GraphNode = {
+      id: `entity:${entityKey}`,
+      label: entityTerm,
+      subtitle: ellipsis(entityUri, 52),
+      x: entityX,
+      y: basePadding + (index + 1) * entitySpacing,
+      kind: "entity",
+    };
+    entityIds.set(entityKey, node);
+
+    const fileNode = fileIds.get(sourceFile);
+    if (fileNode) {
       edges.push({
-        id: `alias:${item.uri}:${source}:${target}`,
-        source: `term:${source}`,
-        target: `term:${target}`,
-        kind: "alias",
+        id: `contenue:${entityKey}->${sourceFile}`,
+        source: node.id,
+        target: fileNode.id,
+        relation: "contenue",
       });
     }
-  }
+  });
+
+  selected.forEach((item, index) => {
+    const propertyId = `property:${item.sourceFile}||${item.term}||${item.uri}`;
+    const node: GraphNode = {
+      id: propertyId,
+      label: item.term,
+      subtitle: ellipsis(item.uri, 56),
+      x: propertyX,
+      y: basePadding + (index + 1) * propertySpacing,
+      kind: "property",
+    };
+    propertyIds.set(propertyId, node);
+
+    const entityKey = `${item.sourceFile}||${item.entityTerm}||${item.entityUri}`;
+    const entityNode = entityIds.get(entityKey);
+    if (entityNode) {
+      edges.push({
+        id: `domaine:${propertyId}->${entityNode.id}`,
+        source: propertyId,
+        target: entityNode.id,
+        relation: "domaine",
+      });
+    }
+  });
 
   return {
-    nodes,
+    nodes: [...fileIds.values(), ...entityIds.values(), ...propertyIds.values()],
     edges,
     width,
     height,
-    truncated: sortedTerms.length > maxTerms,
+    truncated,
   };
 }
 
 type OntologyGraphProps = {
-  items: GroupedDefinition[];
+  items: InternalPropertyLink[];
 };
 
 function OntologyGraph({ items }: OntologyGraphProps) {
@@ -192,8 +191,9 @@ function OntologyGraph({ items }: OntologyGraphProps) {
     <section className={styles.section}>
       <h2 className={styles.sectionTitle}>Modele graphe de l'ontologie</h2>
       <p className={styles.sectionSubtitle}>
-        Noeuds a gauche: termes. Noeuds a droite: URI de definitions CEREMA. Traits verts:
-        relation terme → URI. Traits pointilles: alias entre termes d'une meme URI.
+        Les URI sont des attributs de noeuds de proprietes. Chaque propriete est reliee a son
+        entite par la relation <code>domaine</code>. Chaque entite est reliee au fichier
+        <code>-context.jsonld</code> par la relation <code>contenue</code>.
       </p>
 
       {model.truncated && (
@@ -211,29 +211,56 @@ function OntologyGraph({ items }: OntologyGraphProps) {
             if (!source || !target) {
               return null;
             }
+            const midX = (source.x + target.x) / 2;
+            const midY = (source.y + target.y) / 2;
             return (
-              <line
-                key={edge.id}
-                x1={source.x}
-                y1={source.y}
-                x2={target.x}
-                y2={target.y}
-                className={edge.kind === "definition" ? styles.edgeDefinition : styles.edgeAlias}
-              />
+              <g key={edge.id}>
+                <line
+                  x1={source.x}
+                  y1={source.y}
+                  x2={target.x}
+                  y2={target.y}
+                  className={
+                    edge.relation === "domaine" ? styles.edgeDefinition : styles.edgeAlias
+                  }
+                />
+                <text x={midX} y={midY - 2} className={styles.edgeLabel} textAnchor="middle">
+                  {edge.relation}
+                </text>
+              </g>
             );
           })}
 
           {model.nodes.map((node) => (
             <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
-              <circle className={node.kind === "term" ? styles.nodeTerm : styles.nodeUri} r="5.5" />
+              <circle
+                className={
+                  node.kind === "property"
+                    ? styles.nodeTerm
+                    : node.kind === "entity"
+                      ? styles.nodeUri
+                      : styles.nodeFile
+                }
+                r="6"
+              />
               <text
                 className={styles.nodeLabel}
-                x={node.kind === "term" ? -10 : 10}
+                x={node.kind === "property" ? -10 : 10}
                 y="4"
-                textAnchor={node.kind === "term" ? "end" : "start"}
+                textAnchor={node.kind === "property" ? "end" : "start"}
               >
                 {node.label}
               </text>
+              {node.subtitle && (
+                <text
+                  className={styles.nodeSubLabel}
+                  x={node.kind === "property" ? -10 : 10}
+                  y="18"
+                  textAnchor={node.kind === "property" ? "end" : "start"}
+                >
+                  {node.subtitle}
+                </text>
+              )}
             </g>
           ))}
         </svg>
@@ -272,6 +299,9 @@ function DefinitionCard({ item, external }: DefinitionCardProps) {
           <li key={term}>{term}</li>
         ))}
       </ul>
+
+      <p className={styles.blockTitle}>Definition</p>
+      <div className={styles.definitionPlaceholder} />
 
       <p className={styles.blockTitle}>Fichiers contextes</p>
       <ul className={styles.list}>
@@ -326,6 +356,9 @@ export function ContextDefinitions() {
   const filteredExternal = useMemo(() => {
     return filterDefinitions(payload?.external ?? [], query);
   }, [payload?.external, query]);
+  const filteredPropertyLinks = useMemo(() => {
+    return filterPropertyLinks(payload?.internalProperties ?? [], query);
+  }, [payload?.internalProperties, query]);
 
   return (
     <section className={styles.page}>
@@ -428,7 +461,7 @@ export function ContextDefinitions() {
               </>
             )}
 
-            {tab === "graph" && <OntologyGraph items={filteredInternal} />}
+            {tab === "graph" && <OntologyGraph items={filteredPropertyLinks} />}
           </>
         )}
       </div>

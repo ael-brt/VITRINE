@@ -3,7 +3,7 @@ const REPO_NAME = "ngsild-api-data-models";
 const REPO_BRANCH = "main";
 const TREE_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/git/trees/${REPO_BRANCH}?recursive=1`;
 const RAW_BASE_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/`;
-const CACHE_KEY = "vitrine.context-definitions.v1";
+const CACHE_KEY = "vitrine.context-definitions.v2";
 
 type JsonLdContextValue = string | { "@id"?: string } | null;
 
@@ -28,10 +28,19 @@ export type GroupedDefinition = {
   sourceFiles: string[];
 };
 
+export type InternalPropertyLink = {
+  term: string;
+  uri: string;
+  sourceFile: string;
+  entityTerm: string;
+  entityUri: string;
+};
+
 export type ContextDefinitionsResult = {
   files: string[];
   internal: GroupedDefinition[];
   external: GroupedDefinition[];
+  internalProperties: InternalPropertyLink[];
   skippedFiles: Array<{ file: string; reason: string }>;
 };
 
@@ -45,13 +54,20 @@ function readSessionCache(): ContextDefinitionsResult | null {
   }
   try {
     const parsed = JSON.parse(raw) as Partial<ContextDefinitionsResult>;
-    if (!Array.isArray(parsed.files) || !Array.isArray(parsed.internal) || !Array.isArray(parsed.external)) {
+    if (
+      !Array.isArray(parsed.files) ||
+      !Array.isArray(parsed.internal) ||
+      !Array.isArray(parsed.external)
+    ) {
       return null;
     }
     return {
       files: parsed.files,
       internal: parsed.internal as GroupedDefinition[],
       external: parsed.external as GroupedDefinition[],
+      internalProperties: Array.isArray(parsed.internalProperties)
+        ? (parsed.internalProperties as InternalPropertyLink[])
+        : [],
       skippedFiles: Array.isArray(parsed.skippedFiles) ? parsed.skippedFiles : [],
     };
   } catch {
@@ -119,6 +135,45 @@ function flattenContext(rawContext: unknown): Record<string, JsonLdContextValue>
 
 function classifyAsInternal(uri: string): boolean {
   return /semantics\.cerema\.fr/i.test(uri);
+}
+
+function firstUppercase(value: string): boolean {
+  if (!value) {
+    return false;
+  }
+  const char = value[0];
+  return char.toUpperCase() === char && char.toLowerCase() !== char;
+}
+
+function uriNamespace(uri: string): string {
+  const hashIndex = uri.lastIndexOf("#");
+  if (hashIndex >= 0) {
+    return uri.slice(0, hashIndex + 1);
+  }
+  const slashIndex = uri.lastIndexOf("/");
+  if (slashIndex >= 0) {
+    return uri.slice(0, slashIndex + 1);
+  }
+  return uri;
+}
+
+function uriLocalName(uri: string): string {
+  const hashIndex = uri.lastIndexOf("#");
+  if (hashIndex >= 0) {
+    return uri.slice(hashIndex + 1);
+  }
+  const slashIndex = uri.lastIndexOf("/");
+  if (slashIndex >= 0) {
+    return uri.slice(slashIndex + 1);
+  }
+  return uri;
+}
+
+function detectEntityCandidate(item: DefinitionItem): boolean {
+  if (firstUppercase(item.term)) {
+    return true;
+  }
+  return firstUppercase(uriLocalName(item.uri));
 }
 
 function groupDefinitions(items: DefinitionItem[]): GroupedDefinition[] {
@@ -223,6 +278,68 @@ function extractDefinitions(document: JsonLdDocument, sourceFile: string): Defin
   return items;
 }
 
+function fileStem(path: string): string {
+  const lastSlash = path.lastIndexOf("/");
+  const fileName = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+  const suffix = "-context.jsonld";
+  if (fileName.endsWith(suffix)) {
+    return fileName.slice(0, -suffix.length);
+  }
+  return fileName;
+}
+
+function buildInternalPropertyLinks(items: DefinitionItem[]): InternalPropertyLink[] {
+  const byFile = new Map<string, DefinitionItem[]>();
+  for (const item of items) {
+    if (!byFile.has(item.sourceFile)) {
+      byFile.set(item.sourceFile, []);
+    }
+    byFile.get(item.sourceFile)?.push(item);
+  }
+
+  const links: InternalPropertyLink[] = [];
+
+  for (const [sourceFile, fileItems] of byFile.entries()) {
+    const entityCandidates = fileItems.filter((item) => detectEntityCandidate(item));
+    const entityFallbackTerm = fileStem(sourceFile);
+    const entityFallbackUri = `context:${sourceFile}`;
+
+    const internalProperties = fileItems.filter(
+      (item) => classifyAsInternal(item.uri) && !detectEntityCandidate(item),
+    );
+
+    for (const property of internalProperties) {
+      const propertyNamespace = uriNamespace(property.uri);
+      const bestEntity =
+        entityCandidates
+          .slice()
+          .sort((left, right) => {
+            const leftScore = uriNamespace(left.uri) === propertyNamespace ? 1 : 0;
+            const rightScore = uriNamespace(right.uri) === propertyNamespace ? 1 : 0;
+            if (leftScore !== rightScore) {
+              return rightScore - leftScore;
+            }
+            return left.term.localeCompare(right.term);
+          })[0] ?? null;
+
+      links.push({
+        term: property.term,
+        uri: property.uri,
+        sourceFile,
+        entityTerm: bestEntity ? bestEntity.term : entityFallbackTerm,
+        entityUri: bestEntity ? bestEntity.uri : entityFallbackUri,
+      });
+    }
+  }
+
+  return links.sort((left, right) => {
+    if (left.sourceFile !== right.sourceFile) {
+      return left.sourceFile.localeCompare(right.sourceFile);
+    }
+    return left.term.localeCompare(right.term);
+  });
+}
+
 export async function fetchContextDefinitions(): Promise<ContextDefinitionsResult> {
   const cached = readSessionCache();
   if (cached) {
@@ -254,6 +371,7 @@ export async function fetchContextDefinitions(): Promise<ContextDefinitionsResul
     files: contextFiles,
     internal: groupDefinitions(internalItems),
     external: groupDefinitions(externalItems),
+    internalProperties: buildInternalPropertyLinks(allDefinitions),
     skippedFiles,
   };
 
