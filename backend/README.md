@@ -12,6 +12,10 @@ Quick local bootstrap:
 - set `DB_ENGINE=postgis` and `USE_REDIS_CACHE=true` in `backend/.env`
 - run `python manage.py migrate`
 
+Full stack bootstrap (from repo root):
+- `docker compose up -d --build`
+- app exposed on `http://<VM_PUBLIC_IP>/` (frontend + `/api` reverse-proxy)
+
 ## Modules
 - `apps/core`: technical endpoints (`/health`)
 - `apps/accounts`: user/account endpoints

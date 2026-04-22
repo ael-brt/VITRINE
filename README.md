@@ -29,6 +29,38 @@ Backend now supports:
 - Celery worker (`celery -A config worker -l info`)
 - Local services bootstrap: `docker compose -f backend/docker-compose.stack.yml up -d`
 
+## Run Full Stack With Docker (recommended on VM)
+
+From repository root:
+
+```bash
+docker compose up -d --build
+```
+
+Services launched:
+- `frontend` (Nginx, exposed on port `80`)
+- `backend` (Django + Gunicorn, internal)
+- `celery-worker`
+- `celery-beat`
+- `postgres` (PostGIS)
+- `redis`
+
+Useful commands:
+
+```bash
+docker compose ps
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose down
+```
+
+Persistent startup behavior:
+- all services use `restart: unless-stopped`
+- Docker service itself should be enabled on VM (`sudo systemctl enable --now docker`)
+
+Public entrypoint after deployment:
+- `http://<VM_PUBLIC_IP>/`
+
 ## Run frontend
 
 ```powershell

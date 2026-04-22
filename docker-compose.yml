@@ -1,0 +1,135 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: vitrine-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vitrine}
+      POSTGRES_USER: ${POSTGRES_USER:-vitrine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vitrine}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vitrine} -d ${POSTGRES_DB:-vitrine}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: vitrine-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vitrine-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_ENGINE: postgis
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-vitrine}
+      POSTGRES_USER: ${POSTGRES_USER:-vitrine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vitrine}
+      USE_REDIS_CACHE: "true"
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-127.0.0.1,localhost}
+      INIT_FIXTURES: ${INIT_FIXTURES:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_static:/app/staticfiles
+    expose:
+      - "8000"
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vitrine-celery-worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_ENGINE: postgis
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-vitrine}
+      POSTGRES_USER: ${POSTGRES_USER:-vitrine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vitrine}
+      USE_REDIS_CACHE: "true"
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    command: celery -A config worker -l info
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vitrine-celery-beat
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_ENGINE: postgis
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-vitrine}
+      POSTGRES_USER: ${POSTGRES_USER:-vitrine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vitrine}
+      USE_REDIS_CACHE: "true"
+      REDIS_URL: redis://redis:6379/1
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    command: celery -A config beat -l info
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    container_name: vitrine-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "80:80"
+
+volumes:
+  pgdata:
+  redisdata:
+  backend_static:
