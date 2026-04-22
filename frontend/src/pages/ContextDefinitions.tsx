@@ -124,6 +124,9 @@ export function ContextDefinitions() {
               <span className="pill">{payload.files.length} fichiers contextes</span>
               <span className="pill">{payload.internal.length} URI CEREMA</span>
               <span className="pill">{payload.external.length} URI externes</span>
+              {payload.skippedFiles.length > 0 && (
+                <span className="pill">{payload.skippedFiles.length} fichier(s) ignores</span>
+              )}
             </div>
           )}
         </header>
@@ -144,6 +147,12 @@ export function ContextDefinitions() {
 
         {!loading && !error && payload && (
           <>
+            {payload.skippedFiles.length > 0 && (
+              <div className={`${styles.status} ${styles.error}`}>
+                {payload.skippedFiles.length} fichier(s) contexte n'ont pas pu etre parses.
+                L'onglet reste utilisable avec les autres fichiers valides.
+              </div>
+            )}
             <section className={styles.section}>
               <h2 className={styles.sectionTitle}>Definitions internes CEREMA</h2>
               <p className={styles.sectionSubtitle}>
@@ -174,4 +183,3 @@ export function ContextDefinitions() {
     </section>
   );
 }
-

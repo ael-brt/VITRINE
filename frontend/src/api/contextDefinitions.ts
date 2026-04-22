@@ -32,6 +32,7 @@ export type ContextDefinitionsResult = {
   files: string[];
   internal: GroupedDefinition[];
   external: GroupedDefinition[];
+  skippedFiles: Array<{ file: string; reason: string }>;
 };
 
 function readSessionCache(): ContextDefinitionsResult | null {
@@ -43,7 +44,16 @@ function readSessionCache(): ContextDefinitionsResult | null {
     return null;
   }
   try {
-    return JSON.parse(raw) as ContextDefinitionsResult;
+    const parsed = JSON.parse(raw) as Partial<ContextDefinitionsResult>;
+    if (!Array.isArray(parsed.files) || !Array.isArray(parsed.internal) || !Array.isArray(parsed.external)) {
+      return null;
+    }
+    return {
+      files: parsed.files,
+      internal: parsed.internal as GroupedDefinition[],
+      external: parsed.external as GroupedDefinition[],
+      skippedFiles: Array.isArray(parsed.skippedFiles) ? parsed.skippedFiles : [],
+    };
   } catch {
     return null;
   }
@@ -54,6 +64,13 @@ function writeSessionCache(payload: ContextDefinitionsResult) {
     return;
   }
   window.sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+}
+
+function sanitizeJsonLikeText(raw: string): string {
+  return raw
+    .replace(/^\uFEFF/, "")
+    .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ")
+    .replace(/,\s*([}\]])/g, "$1");
 }
 
 function isAbsoluteUri(value: string): boolean {
@@ -146,7 +163,18 @@ async function fetchContextFile(path: string): Promise<JsonLdDocument> {
   if (!response.ok) {
     throw new Error(`Impossible de charger ${path} (${response.status}).`);
   }
-  return (await response.json()) as JsonLdDocument;
+  const raw = await response.text();
+  try {
+    return JSON.parse(raw) as JsonLdDocument;
+  } catch (error) {
+    const sanitized = sanitizeJsonLikeText(raw);
+    try {
+      return JSON.parse(sanitized) as JsonLdDocument;
+    } catch {
+      const detail = error instanceof Error ? error.message : "JSON parse error";
+      throw new Error(`JSON invalide dans ${path}: ${detail}`);
+    }
+  }
 }
 
 function extractDefinitions(document: JsonLdDocument, sourceFile: string): DefinitionItem[] {
@@ -208,9 +236,15 @@ export async function fetchContextDefinitions(): Promise<ContextDefinitionsResul
     .sort((left, right) => left.localeCompare(right));
 
   const allDefinitions: DefinitionItem[] = [];
+  const skippedFiles: Array<{ file: string; reason: string }> = [];
   for (const file of contextFiles) {
-    const document = await fetchContextFile(file);
-    allDefinitions.push(...extractDefinitions(document, file));
+    try {
+      const document = await fetchContextFile(file);
+      allDefinitions.push(...extractDefinitions(document, file));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Erreur de lecture";
+      skippedFiles.push({ file, reason });
+    }
   }
 
   const internalItems = allDefinitions.filter((item) => classifyAsInternal(item.uri));
@@ -220,9 +254,9 @@ export async function fetchContextDefinitions(): Promise<ContextDefinitionsResul
     files: contextFiles,
     internal: groupDefinitions(internalItems),
     external: groupDefinitions(externalItems),
+    skippedFiles,
   };
 
   writeSessionCache(result);
   return result;
 }
-
