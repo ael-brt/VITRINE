@@ -49,6 +49,7 @@ type GraphNode = {
   subtitle?: string;
   x: number;
   y: number;
+  isInternalProperty?: boolean;
   kind: "property" | "entity" | "file";
 };
 
@@ -145,6 +146,7 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
       x: propertyX,
       y: basePadding + (index + 1) * propertySpacing,
       kind: "property",
+      isInternalProperty: item.isInternal,
     };
     propertyIds.set(propertyId, node);
 
@@ -194,6 +196,7 @@ function OntologyGraph({ items }: OntologyGraphProps) {
         Les URI sont des attributs de noeuds de proprietes. Chaque propriete est reliee a son
         entite par la relation <code>domaine</code>. Chaque entite est reliee au fichier
         <code>-context.jsonld</code> par la relation <code>contenue</code>.
+        Les proprietes internes CEREMA et les references externes sont toutes deux affichees.
       </p>
 
       {model.truncated && (
@@ -236,7 +239,9 @@ function OntologyGraph({ items }: OntologyGraphProps) {
               <circle
                 className={
                   node.kind === "property"
-                    ? styles.nodeTerm
+                    ? node.isInternalProperty
+                      ? styles.nodeTerm
+                      : styles.nodeTermExternal
                     : node.kind === "entity"
                       ? styles.nodeUri
                       : styles.nodeFile
@@ -357,8 +362,11 @@ export function ContextDefinitions() {
     return filterDefinitions(payload?.external ?? [], query);
   }, [payload?.external, query]);
   const filteredPropertyLinks = useMemo(() => {
-    return filterPropertyLinks(payload?.internalProperties ?? [], query);
-  }, [payload?.internalProperties, query]);
+    const links =
+      payload?.propertyLinks ??
+      (payload?.internalProperties ?? []).map((item) => ({ ...item, isInternal: true }));
+    return filterPropertyLinks(links, query);
+  }, [payload?.propertyLinks, payload?.internalProperties, query]);
 
   return (
     <section className={styles.page}>

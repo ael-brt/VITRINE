@@ -3,7 +3,7 @@ const REPO_NAME = "ngsild-api-data-models";
 const REPO_BRANCH = "main";
 const TREE_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/git/trees/${REPO_BRANCH}?recursive=1`;
 const RAW_BASE_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/`;
-const CACHE_KEY = "vitrine.context-definitions.v3";
+const CACHE_KEY = "vitrine.context-definitions.v4";
 
 type JsonLdContextValue = string | { "@id"?: string } | null;
 
@@ -35,12 +35,14 @@ export type InternalPropertyLink = {
   sourceFile: string;
   entityTerm: string;
   entityUri: string;
+  isInternal: boolean;
 };
 
 export type ContextDefinitionsResult = {
   files: string[];
   internal: GroupedDefinition[];
   external: GroupedDefinition[];
+  propertyLinks: InternalPropertyLink[];
   internalProperties: InternalPropertyLink[];
   skippedFiles: Array<{ file: string; reason: string }>;
 };
@@ -66,6 +68,9 @@ function readSessionCache(): ContextDefinitionsResult | null {
       files: parsed.files,
       internal: parsed.internal as GroupedDefinition[],
       external: parsed.external as GroupedDefinition[],
+      propertyLinks: Array.isArray(parsed.propertyLinks)
+        ? (parsed.propertyLinks as InternalPropertyLink[])
+        : [],
       internalProperties: Array.isArray(parsed.internalProperties)
         ? (parsed.internalProperties as InternalPropertyLink[])
         : [],
@@ -355,7 +360,7 @@ function fileStem(path: string): string {
   return fileName;
 }
 
-function buildInternalPropertyLinks(items: DefinitionItem[]): InternalPropertyLink[] {
+function buildPropertyLinks(items: DefinitionItem[]): InternalPropertyLink[] {
   const byFile = new Map<string, DefinitionItem[]>();
   for (const item of items) {
     if (!byFile.has(item.sourceFile)) {
@@ -373,14 +378,11 @@ function buildInternalPropertyLinks(items: DefinitionItem[]): InternalPropertyLi
     const entityFallbackTerm = fileStem(sourceFile);
     const entityFallbackUri = `context:${sourceFile}`;
 
-    const internalProperties = fileItems.filter(
-      (item) =>
-        classifyAsInternal(item.uri) &&
-        !item.isPrefixDeclaration &&
-        !detectEntityCandidate(item),
+    const properties = fileItems.filter(
+      (item) => !item.isPrefixDeclaration && !detectEntityCandidate(item),
     );
 
-    for (const property of internalProperties) {
+    for (const property of properties) {
       const propertyNamespace = uriNamespace(property.uri);
       const bestEntity =
         entityCandidates
@@ -400,6 +402,7 @@ function buildInternalPropertyLinks(items: DefinitionItem[]): InternalPropertyLi
         sourceFile,
         entityTerm: bestEntity ? bestEntity.term : entityFallbackTerm,
         entityUri: bestEntity ? bestEntity.uri : entityFallbackUri,
+        isInternal: classifyAsInternal(property.uri),
       });
     }
   }
@@ -438,12 +441,14 @@ export async function fetchContextDefinitions(): Promise<ContextDefinitionsResul
 
   const internalItems = allDefinitions.filter((item) => classifyAsInternal(item.uri));
   const externalItems = allDefinitions.filter((item) => !classifyAsInternal(item.uri));
+  const propertyLinks = buildPropertyLinks(allDefinitions);
 
   const result: ContextDefinitionsResult = {
     files: contextFiles,
     internal: groupDefinitions(internalItems),
     external: groupDefinitions(externalItems),
-    internalProperties: buildInternalPropertyLinks(allDefinitions),
+    propertyLinks,
+    internalProperties: propertyLinks.filter((item) => item.isInternal),
     skippedFiles,
   };
 

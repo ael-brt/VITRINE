@@ -186,6 +186,10 @@
   fill: #244b36;
 }
 
+.nodeTermExternal {
+  fill: #7a2143;
+}
+
 .nodeUri {
   fill: #2c4f7c;
 }
