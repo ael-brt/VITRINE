@@ -33,6 +33,9 @@ PY
 echo "Running migrations..."
 python manage.py migrate --noinput
 
+echo "Collecting static files..."
+python manage.py collectstatic --noinput
+
 if [ "${INIT_FIXTURES:-false}" = "true" ]; then
   echo "Loading fixtures..."
   python manage.py loaddata apps/dashboards/fixtures/initial_dashboards.json || true
