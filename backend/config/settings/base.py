@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     "apps.dashboards",
     "apps.geodata",
     "apps.ngsild",
+    "apps.ontology",
 ]
 
 MIDDLEWARE = [

@@ -1,26 +1,12 @@
-const REPO_OWNER = "CEREMA";
-const REPO_NAME = "ngsild-api-data-models";
-const REPO_BRANCH = "main";
-const TREE_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/git/trees/${REPO_BRANCH}?recursive=1`;
-const RAW_BASE_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}/`;
-const CACHE_KEY = "vitrine.context-definitions.v4";
+import { getAuthToken } from "../auth";
 
-type JsonLdContextValue = string | { "@id"?: string } | null;
+const CACHE_KEY = "vitrine.context-definitions.backend.v2";
+const API_URL = "/api/v1/ontology/definitions/";
 
-type JsonLdDocument = {
-  "@context"?: unknown;
-};
-
-type TreeEntry = {
-  path: string;
-  type: string;
-};
-
-export type DefinitionItem = {
-  term: string;
-  uri: string;
-  sourceFile: string;
-  isPrefixDeclaration: boolean;
+export type ContextDefinitionsFilters = {
+  dashboard?: string | null;
+  entityType?: string | null;
+  tenant?: string | null;
 };
 
 export type GroupedDefinition = {
@@ -30,12 +16,15 @@ export type GroupedDefinition = {
 };
 
 export type InternalPropertyLink = {
+  dashboardSlug: string;
+  entityType: string;
   term: string;
   uri: string;
   sourceFile: string;
   entityTerm: string;
   entityUri: string;
   isInternal: boolean;
+  definitionSource: string;
 };
 
 export type ContextDefinitionsResult = {
@@ -47,411 +36,135 @@ export type ContextDefinitionsResult = {
   skippedFiles: Array<{ file: string; reason: string }>;
 };
 
-function readSessionCache(): ContextDefinitionsResult | null {
+type ApiGroupedDefinition = {
+  uri: string;
+  terms: string[];
+  source_files: string[];
+};
+
+type ApiPropertyLink = {
+  dashboard_slug: string;
+  entity_type: string;
+  term: string;
+  uri: string;
+  source_file: string;
+  entity_term: string;
+  entity_uri: string;
+  is_internal: boolean;
+  definition_source: string;
+};
+
+type ApiOntologyPayload = {
+  files: string[];
+  internal: ApiGroupedDefinition[];
+  external: ApiGroupedDefinition[];
+  property_links: ApiPropertyLink[];
+  internal_properties: ApiPropertyLink[];
+  skipped_files: Array<{ file: string; reason: string }>;
+};
+
+function buildCacheKey(filters?: ContextDefinitionsFilters): string {
+  const dashboard = filters?.dashboard?.trim() || "";
+  const entityType = filters?.entityType?.trim() || "";
+  const tenant = filters?.tenant?.trim() || "";
+  return `${CACHE_KEY}:dashboard=${dashboard}:entity=${entityType}:tenant=${tenant}`;
+}
+
+function readSessionCache(cacheKey: string): ContextDefinitionsResult | null {
   if (typeof window === "undefined") {
     return null;
   }
-  const raw = window.sessionStorage.getItem(CACHE_KEY);
+  const raw = window.sessionStorage.getItem(cacheKey);
   if (!raw) {
     return null;
   }
   try {
-    const parsed = JSON.parse(raw) as Partial<ContextDefinitionsResult>;
-    if (
-      !Array.isArray(parsed.files) ||
-      !Array.isArray(parsed.internal) ||
-      !Array.isArray(parsed.external)
-    ) {
-      return null;
-    }
-    return {
-      files: parsed.files,
-      internal: parsed.internal as GroupedDefinition[],
-      external: parsed.external as GroupedDefinition[],
-      propertyLinks: Array.isArray(parsed.propertyLinks)
-        ? (parsed.propertyLinks as InternalPropertyLink[])
-        : [],
-      internalProperties: Array.isArray(parsed.internalProperties)
-        ? (parsed.internalProperties as InternalPropertyLink[])
-        : [],
-      skippedFiles: Array.isArray(parsed.skippedFiles) ? parsed.skippedFiles : [],
-    };
+    return JSON.parse(raw) as ContextDefinitionsResult;
   } catch {
     return null;
   }
 }
 
-function writeSessionCache(payload: ContextDefinitionsResult) {
+function writeSessionCache(cacheKey: string, payload: ContextDefinitionsResult) {
   if (typeof window === "undefined") {
     return;
   }
-  window.sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  window.sessionStorage.setItem(cacheKey, JSON.stringify(payload));
 }
 
-function sanitizeJsonLikeText(raw: string): string {
-  return raw
-    .replace(/^\uFEFF/, "")
-    .replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ")
-    .replace(/,\s*([}\]])/g, "$1");
-}
-
-function isAbsoluteUri(value: string): boolean {
-  return /^https?:\/\//i.test(value) || /^urn:/i.test(value);
-}
-
-function isLikelyPrefix(value: string): boolean {
-  if (!isAbsoluteUri(value)) {
-    return false;
-  }
-  return value.endsWith("/") || value.endsWith("#");
-}
-
-function resolveCompactIri(value: string, prefixes: Map<string, string>): string {
-  if (isAbsoluteUri(value)) {
-    return value;
-  }
-  const separatorIndex = value.indexOf(":");
-  if (separatorIndex <= 0) {
-    return "";
-  }
-
-  const prefix = value.slice(0, separatorIndex);
-  const suffix = value.slice(separatorIndex + 1);
-  const base = prefixes.get(prefix);
-  if (!base) {
-    return "";
-  }
-  return `${base}${suffix}`;
-}
-
-function flattenContext(rawContext: unknown): Record<string, JsonLdContextValue>[] {
-  if (!rawContext) {
+function mapGrouped(items: ApiGroupedDefinition[] | undefined): GroupedDefinition[] {
+  if (!Array.isArray(items)) {
     return [];
   }
-  if (Array.isArray(rawContext)) {
-    return rawContext.filter((item): item is Record<string, JsonLdContextValue> => {
-      return item !== null && typeof item === "object" && !Array.isArray(item);
-    });
-  }
-  if (typeof rawContext === "object") {
-    return [rawContext as Record<string, JsonLdContextValue>];
-  }
-  return [];
+  return items.map((item) => ({
+    uri: item.uri ?? "",
+    terms: Array.isArray(item.terms) ? item.terms : [],
+    sourceFiles: Array.isArray(item.source_files) ? item.source_files : [],
+  }));
 }
 
-function classifyAsInternal(uri: string): boolean {
-  return /semantics\.cerema\.fr/i.test(uri);
+function mapLinks(items: ApiPropertyLink[] | undefined): InternalPropertyLink[] {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.map((item) => ({
+    dashboardSlug: item.dashboard_slug ?? "",
+    entityType: item.entity_type ?? "",
+    term: item.term ?? "",
+    uri: item.uri ?? "",
+    sourceFile: item.source_file ?? "",
+    entityTerm: item.entity_term ?? "",
+    entityUri: item.entity_uri ?? "",
+    isInternal: !!item.is_internal,
+    definitionSource: item.definition_source ?? "unknown",
+  }));
 }
 
-function firstUppercase(value: string): boolean {
-  if (!value) {
-    return false;
+function buildUrl(filters?: ContextDefinitionsFilters): string {
+  const search = new URLSearchParams();
+  const dashboard = filters?.dashboard?.trim();
+  const entityType = filters?.entityType?.trim();
+  const tenant = filters?.tenant?.trim();
+  if (dashboard) {
+    search.set("dashboard", dashboard);
   }
-  const char = value[0];
-  return char.toUpperCase() === char && char.toLowerCase() !== char;
+  if (entityType) {
+    search.set("entity_type", entityType);
+  }
+  if (tenant) {
+    search.set("tenant", tenant);
+  }
+  const query = search.toString();
+  return query ? `${API_URL}?${query}` : API_URL;
 }
 
-function uriNamespace(uri: string): string {
-  const hashIndex = uri.lastIndexOf("#");
-  if (hashIndex >= 0) {
-    return uri.slice(0, hashIndex + 1);
-  }
-  const slashIndex = uri.lastIndexOf("/");
-  if (slashIndex >= 0) {
-    return uri.slice(0, slashIndex + 1);
-  }
-  return uri;
-}
-
-function uriLocalName(uri: string): string {
-  const normalized = uri.replace(/[\/#]+$/, "");
-  if (!normalized) {
-    return uri;
-  }
-  const hashIndex = normalized.lastIndexOf("#");
-  if (hashIndex >= 0) {
-    return normalized.slice(hashIndex + 1);
-  }
-  const slashIndex = normalized.lastIndexOf("/");
-  if (slashIndex >= 0) {
-    return normalized.slice(slashIndex + 1);
-  }
-  return normalized;
-}
-
-function titleCaseToken(value: string): string {
-  if (!value) {
-    return value;
-  }
-  return value[0].toUpperCase() + value.slice(1);
-}
-
-function deriveEntityLabel(item: DefinitionItem): string {
-  if (firstUppercase(item.term)) {
-    return item.term;
-  }
-  const local = uriLocalName(item.uri);
-  if (local) {
-    return titleCaseToken(local);
-  }
-  return titleCaseToken(item.term);
-}
-
-type EntityCandidate = {
-  term: string;
-  uri: string;
-  namespace: string;
-};
-
-function toEntityCandidate(item: DefinitionItem): EntityCandidate {
-  return {
-    term: deriveEntityLabel(item),
-    uri: item.uri,
-    namespace: item.isPrefixDeclaration ? item.uri : uriNamespace(item.uri),
-  };
-}
-
-function dedupeEntityCandidates(items: EntityCandidate[]): EntityCandidate[] {
-  const seen = new Set<string>();
-  const deduped: EntityCandidate[] = [];
-  for (const item of items) {
-    const key = `${item.namespace}||${item.term}||${item.uri}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    deduped.push(item);
-  }
-  return deduped;
-}
-
-function uriLocalNameLegacy(uri: string): string {
-  const hashIndex = uri.lastIndexOf("#");
-  if (hashIndex >= 0) {
-    return uri.slice(hashIndex + 1);
-  }
-  const slashIndex = uri.lastIndexOf("/");
-  if (slashIndex >= 0) {
-    return uri.slice(slashIndex + 1);
-  }
-  return uri;
-}
-
-function detectEntityCandidate(item: DefinitionItem): boolean {
-  if (item.isPrefixDeclaration && classifyAsInternal(item.uri)) {
-    return true;
-  }
-  if (firstUppercase(item.term)) {
-    return true;
-  }
-  return firstUppercase(uriLocalNameLegacy(item.uri));
-}
-
-function groupDefinitions(items: DefinitionItem[]): GroupedDefinition[] {
-  const grouped = new Map<string, { terms: Set<string>; sourceFiles: Set<string> }>();
-  for (const item of items) {
-    if (!grouped.has(item.uri)) {
-      grouped.set(item.uri, {
-        terms: new Set<string>(),
-        sourceFiles: new Set<string>(),
-      });
-    }
-    const bucket = grouped.get(item.uri);
-    if (!bucket) {
-      continue;
-    }
-    bucket.terms.add(item.term);
-    bucket.sourceFiles.add(item.sourceFile);
-  }
-
-  return Array.from(grouped.entries())
-    .map(([uri, value]) => ({
-      uri,
-      terms: Array.from(value.terms).sort((left, right) => left.localeCompare(right)),
-      sourceFiles: Array.from(value.sourceFiles).sort((left, right) =>
-        left.localeCompare(right),
-      ),
-    }))
-    .sort((left, right) => left.uri.localeCompare(right.uri));
-}
-
-async function fetchTreeEntries(): Promise<TreeEntry[]> {
-  const response = await fetch(TREE_API_URL);
-  if (!response.ok) {
-    throw new Error(`Impossible de lister les fichiers contextes (${response.status}).`);
-  }
-  const payload = (await response.json()) as { tree?: TreeEntry[] };
-  return Array.isArray(payload.tree) ? payload.tree : [];
-}
-
-async function fetchContextFile(path: string): Promise<JsonLdDocument> {
-  const response = await fetch(`${RAW_BASE_URL}${path}`);
-  if (!response.ok) {
-    throw new Error(`Impossible de charger ${path} (${response.status}).`);
-  }
-  const raw = await response.text();
-  try {
-    return JSON.parse(raw) as JsonLdDocument;
-  } catch (error) {
-    const sanitized = sanitizeJsonLikeText(raw);
-    try {
-      return JSON.parse(sanitized) as JsonLdDocument;
-    } catch {
-      const detail = error instanceof Error ? error.message : "JSON parse error";
-      throw new Error(`JSON invalide dans ${path}: ${detail}`);
-    }
-  }
-}
-
-function extractDefinitions(document: JsonLdDocument, sourceFile: string): DefinitionItem[] {
-  const contexts = flattenContext(document["@context"]);
-  const prefixes = new Map<string, string>();
-  const items: DefinitionItem[] = [];
-
-  for (const context of contexts) {
-    for (const [key, rawValue] of Object.entries(context)) {
-      if (key.startsWith("@")) {
-        continue;
-      }
-      if (typeof rawValue === "string" && isLikelyPrefix(rawValue)) {
-        prefixes.set(key, rawValue);
-      }
-    }
-  }
-
-  for (const context of contexts) {
-    for (const [key, rawValue] of Object.entries(context)) {
-      if (key.startsWith("@")) {
-        continue;
-      }
-
-      let candidate = "";
-      if (typeof rawValue === "string") {
-        candidate = resolveCompactIri(rawValue, prefixes);
-      } else if (rawValue && typeof rawValue === "object" && "@id" in rawValue) {
-        const value = rawValue["@id"];
-        if (typeof value === "string") {
-          candidate = resolveCompactIri(value, prefixes);
-        }
-      }
-
-      if (!candidate || !isAbsoluteUri(candidate)) {
-        continue;
-      }
-      items.push({
-        term: key,
-        uri: candidate,
-        sourceFile,
-        isPrefixDeclaration: typeof rawValue === "string" && isLikelyPrefix(rawValue),
-      });
-    }
-  }
-
-  return items;
-}
-
-function fileStem(path: string): string {
-  const lastSlash = path.lastIndexOf("/");
-  const fileName = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
-  const suffix = "-context.jsonld";
-  if (fileName.endsWith(suffix)) {
-    return fileName.slice(0, -suffix.length);
-  }
-  return fileName;
-}
-
-function buildPropertyLinks(items: DefinitionItem[]): InternalPropertyLink[] {
-  const byFile = new Map<string, DefinitionItem[]>();
-  for (const item of items) {
-    if (!byFile.has(item.sourceFile)) {
-      byFile.set(item.sourceFile, []);
-    }
-    byFile.get(item.sourceFile)?.push(item);
-  }
-
-  const links: InternalPropertyLink[] = [];
-
-  for (const [sourceFile, fileItems] of byFile.entries()) {
-    const entityCandidates = dedupeEntityCandidates(
-      fileItems.filter((item) => detectEntityCandidate(item)).map(toEntityCandidate),
-    );
-    const entityFallbackTerm = fileStem(sourceFile);
-    const entityFallbackUri = `context:${sourceFile}`;
-
-    const properties = fileItems.filter(
-      (item) => !item.isPrefixDeclaration && !detectEntityCandidate(item),
-    );
-
-    for (const property of properties) {
-      const propertyNamespace = uriNamespace(property.uri);
-      const bestEntity =
-        entityCandidates
-          .slice()
-          .sort((left, right) => {
-            const leftScore = left.namespace === propertyNamespace ? 1 : 0;
-            const rightScore = right.namespace === propertyNamespace ? 1 : 0;
-            if (leftScore !== rightScore) {
-              return rightScore - leftScore;
-            }
-            return left.term.localeCompare(right.term);
-          })[0] ?? null;
-
-      links.push({
-        term: property.term,
-        uri: property.uri,
-        sourceFile,
-        entityTerm: bestEntity ? bestEntity.term : entityFallbackTerm,
-        entityUri: bestEntity ? bestEntity.uri : entityFallbackUri,
-        isInternal: classifyAsInternal(property.uri),
-      });
-    }
-  }
-
-  return links.sort((left, right) => {
-    if (left.sourceFile !== right.sourceFile) {
-      return left.sourceFile.localeCompare(right.sourceFile);
-    }
-    return left.term.localeCompare(right.term);
-  });
-}
-
-export async function fetchContextDefinitions(): Promise<ContextDefinitionsResult> {
-  const cached = readSessionCache();
+export async function fetchContextDefinitions(
+  filters?: ContextDefinitionsFilters,
+): Promise<ContextDefinitionsResult> {
+  const cacheKey = buildCacheKey(filters);
+  const cached = readSessionCache(cacheKey);
   if (cached) {
     return cached;
   }
 
-  const entries = await fetchTreeEntries();
-  const contextFiles = entries
-    .filter((entry) => entry.type === "blob" && entry.path.endsWith("-context.jsonld"))
-    .map((entry) => entry.path)
-    .sort((left, right) => left.localeCompare(right));
+  const token = getAuthToken();
+  const headers: HeadersInit = token ? { Authorization: `Token ${token}` } : {};
 
-  const allDefinitions: DefinitionItem[] = [];
-  const skippedFiles: Array<{ file: string; reason: string }> = [];
-  for (const file of contextFiles) {
-    try {
-      const document = await fetchContextFile(file);
-      allDefinitions.push(...extractDefinitions(document, file));
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "Erreur de lecture";
-      skippedFiles.push({ file, reason });
-    }
+  const response = await fetch(buildUrl(filters), { headers });
+  if (!response.ok) {
+    throw new Error(`Impossible de charger les definitions ontology (${response.status}).`);
   }
 
-  const internalItems = allDefinitions.filter((item) => classifyAsInternal(item.uri));
-  const externalItems = allDefinitions.filter((item) => !classifyAsInternal(item.uri));
-  const propertyLinks = buildPropertyLinks(allDefinitions);
-
+  const payload = (await response.json()) as ApiOntologyPayload;
+  const propertyLinks = mapLinks(payload.property_links);
   const result: ContextDefinitionsResult = {
-    files: contextFiles,
-    internal: groupDefinitions(internalItems),
-    external: groupDefinitions(externalItems),
+    files: Array.isArray(payload.files) ? payload.files : [],
+    internal: mapGrouped(payload.internal),
+    external: mapGrouped(payload.external),
     propertyLinks,
-    internalProperties: propertyLinks.filter((item) => item.isInternal),
-    skippedFiles,
+    internalProperties: mapLinks(payload.internal_properties),
+    skippedFiles: Array.isArray(payload.skipped_files) ? payload.skipped_files : [],
   };
-
-  writeSessionCache(result);
+  writeSessionCache(cacheKey, result);
   return result;
 }

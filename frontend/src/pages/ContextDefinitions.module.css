@@ -31,6 +31,29 @@
   margin: 20px 0 26px;
 }
 
+.filtersRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.filterLabel {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+
+.filterSelect {
+  min-width: 190px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+  color: var(--color-text);
+}
+
 .subTabs {
   display: inline-flex;
   align-items: center;
@@ -125,6 +148,11 @@
   padding-left: 1rem;
   display: grid;
   gap: 4px;
+}
+
+.termMeta {
+  color: var(--color-text-muted);
+  font-size: 0.86rem;
 }
 
 .definitionPlaceholder {

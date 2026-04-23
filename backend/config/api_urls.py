@@ -6,4 +6,5 @@ urlpatterns = [
     path("projects/", include("apps.projects.urls")),
     path("dashboards/", include("apps.dashboards.urls")),
     path("geodata/", include("apps.geodata.urls")),
+    path("ontology/", include("apps.ontology.urls")),
 ]

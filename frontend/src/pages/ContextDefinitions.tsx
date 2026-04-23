@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchContextDefinitions,
+  type ContextDefinitionsFilters,
   type ContextDefinitionsResult,
   type GroupedDefinition,
   type InternalPropertyLink,
@@ -277,9 +278,10 @@ function OntologyGraph({ items }: OntologyGraphProps) {
 type DefinitionCardProps = {
   item: GroupedDefinition;
   external: boolean;
+  definitionSourcesByTerm: Map<string, string>;
 };
 
-function DefinitionCard({ item, external }: DefinitionCardProps) {
+function DefinitionCard({ item, external, definitionSourcesByTerm }: DefinitionCardProps) {
   return (
     <article className={styles.card}>
       <p className={styles.uri}>
@@ -301,7 +303,15 @@ function DefinitionCard({ item, external }: DefinitionCardProps) {
       <p className={styles.blockTitle}>Proprietes</p>
       <ul className={styles.list}>
         {item.terms.map((term) => (
-          <li key={term}>{term}</li>
+          <li key={term}>
+            {term}
+            {definitionSourcesByTerm.get(`${item.uri}||${term}`) && (
+              <span className={styles.termMeta}>
+                {" "}
+                ({definitionSourcesByTerm.get(`${item.uri}||${term}`)})
+              </span>
+            )}
+          </li>
         ))}
       </ul>
 
@@ -319,8 +329,11 @@ function DefinitionCard({ item, external }: DefinitionCardProps) {
 }
 
 export function ContextDefinitions() {
+  const [catalogPayload, setCatalogPayload] = useState<ContextDefinitionsResult | null>(null);
   const [payload, setPayload] = useState<ContextDefinitionsResult | null>(null);
   const [tab, setTab] = useState<SubTab>("definitions");
+  const [selectedDashboard, setSelectedDashboard] = useState("");
+  const [selectedEntityType, setSelectedEntityType] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -332,6 +345,7 @@ export function ContextDefinitions() {
       try {
         const definitions = await fetchContextDefinitions();
         if (!cancelled) {
+          setCatalogPayload(definitions);
           setPayload(definitions);
           setError(null);
         }
@@ -354,6 +368,73 @@ export function ContextDefinitions() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!catalogPayload) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    async function reloadWithFilters() {
+      setLoading(true);
+      try {
+        const filters: ContextDefinitionsFilters = {
+          dashboard: selectedDashboard || null,
+          entityType: selectedEntityType || null,
+        };
+        const filtered = await fetchContextDefinitions(filters);
+        if (!cancelled) {
+          setPayload(filtered);
+          setError(null);
+        }
+      } catch (cause) {
+        if (!cancelled) {
+          const detail =
+            cause instanceof Error ? cause.message : "Erreur inconnue pendant le chargement.";
+          setError(detail);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void reloadWithFilters();
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogPayload, selectedDashboard, selectedEntityType]);
+
+  const dashboardOptions = useMemo(() => {
+    const links = catalogPayload?.propertyLinks ?? [];
+    return Array.from(
+      new Set(links.map((item) => item.dashboardSlug).filter((item) => !!item)),
+    ).sort((left, right) => left.localeCompare(right));
+  }, [catalogPayload?.propertyLinks]);
+
+  const entityTypeOptions = useMemo(() => {
+    const links = catalogPayload?.propertyLinks ?? [];
+    return Array.from(
+      new Set(
+        links
+          .filter((item) => !selectedDashboard || item.dashboardSlug === selectedDashboard)
+          .map((item) => item.entityType)
+          .filter((item) => !!item),
+      ),
+    ).sort((left, right) => left.localeCompare(right));
+  }, [catalogPayload?.propertyLinks, selectedDashboard]);
+
+  useEffect(() => {
+    if (!selectedEntityType) {
+      return;
+    }
+    if (!entityTypeOptions.includes(selectedEntityType)) {
+      setSelectedEntityType("");
+    }
+  }, [entityTypeOptions, selectedEntityType]);
+
   const filteredInternal = useMemo(() => {
     return filterDefinitions(payload?.internal ?? [], query);
   }, [payload?.internal, query]);
@@ -367,6 +448,25 @@ export function ContextDefinitions() {
       (payload?.internalProperties ?? []).map((item) => ({ ...item, isInternal: true }));
     return filterPropertyLinks(links, query);
   }, [payload?.propertyLinks, payload?.internalProperties, query]);
+
+  const definitionSourcesByTerm = useMemo(() => {
+    const byTerm = new Map<string, Set<string>>();
+    for (const item of filteredPropertyLinks) {
+      if (!item.uri || !item.term) {
+        continue;
+      }
+      const key = `${item.uri}||${item.term}`;
+      if (!byTerm.has(key)) {
+        byTerm.set(key, new Set<string>());
+      }
+      byTerm.get(key)?.add(item.definitionSource || "unknown");
+    }
+    const flattened = new Map<string, string>();
+    for (const [key, values] of byTerm.entries()) {
+      flattened.set(key, Array.from(values).sort((left, right) => left.localeCompare(right)).join(", "));
+    }
+    return flattened;
+  }, [filteredPropertyLinks]);
 
   return (
     <section className={styles.page}>
@@ -393,6 +493,39 @@ export function ContextDefinitions() {
         </header>
 
         <div className={styles.controls}>
+          <div className={styles.filtersRow}>
+            <label className={styles.filterLabel}>
+              Dashboard
+              <select
+                className={styles.filterSelect}
+                value={selectedDashboard}
+                onChange={(event) => setSelectedDashboard(event.target.value)}
+              >
+                <option value="">Tous</option>
+                {dashboardOptions.map((dashboard) => (
+                  <option key={dashboard} value={dashboard}>
+                    {dashboard}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.filterLabel}>
+              Entite
+              <select
+                className={styles.filterSelect}
+                value={selectedEntityType}
+                onChange={(event) => setSelectedEntityType(event.target.value)}
+              >
+                <option value="">Toutes</option>
+                {entityTypeOptions.map((entityType) => (
+                  <option key={entityType} value={entityType}>
+                    {entityType}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <div className={styles.subTabs} role="tablist" aria-label="Sous-onglets contextes">
             <button
               type="button"
@@ -449,7 +582,12 @@ export function ContextDefinitions() {
                   </p>
                   <div className={styles.grid}>
                     {filteredInternal.map((item) => (
-                      <DefinitionCard key={item.uri} item={item} external={false} />
+                      <DefinitionCard
+                        key={item.uri}
+                        item={item}
+                        external={false}
+                        definitionSourcesByTerm={definitionSourcesByTerm}
+                      />
                     ))}
                   </div>
                 </section>
@@ -462,7 +600,12 @@ export function ContextDefinitions() {
                   </p>
                   <div className={styles.grid}>
                     {filteredExternal.map((item) => (
-                      <DefinitionCard key={item.uri} item={item} external />
+                      <DefinitionCard
+                        key={item.uri}
+                        item={item}
+                        external
+                        definitionSourcesByTerm={definitionSourcesByTerm}
+                      />
                     ))}
                   </div>
                 </section>
