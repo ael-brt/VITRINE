@@ -1,0 +1,33 @@
+{% extends "admin/change_list.html" %}
+
+{% block content %}
+<div
+  id="ngsild-types-cascade-root"
+  class="module"
+  style="margin-bottom: 16px; padding: 12px;"
+  data-endpoint="{{ ngsild_types_cascade_endpoint }}"
+  data-sources="{{ ngsild_sources_json|escapejs }}"
+>
+  <h2 style="margin-top: 0;">Exploration Types NGSI-LD Par Tenant</h2>
+  <p style="margin: 0 0 10px;">
+    Cascade: <strong>source</strong> → <strong>tenant</strong> → <strong>types</strong> → <strong>attributs</strong>
+  </p>
+
+  <div style="display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+    <label>
+      Source<br />
+      <select id="ngsild-source-select" style="width: 100%;"></select>
+    </label>
+    <label>
+      Tenant<br />
+      <select id="ngsild-tenant-select" style="width: 100%;"></select>
+    </label>
+  </div>
+
+  <p id="ngsild-types-status" style="margin: 10px 0 0; color: #666;">Selectionne une source pour charger les types.</p>
+  <div id="ngsild-types-summary" style="margin-top: 8px;"></div>
+  <div id="ngsild-types-details" style="margin-top: 8px;"></div>
+</div>
+
+{{ block.super }}
+{% endblock %}

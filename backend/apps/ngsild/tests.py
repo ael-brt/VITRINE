@@ -1,11 +1,19 @@
 from datetime import timedelta
+import json
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.contrib.admin.sites import AdminSite
+from django.contrib.auth import get_user_model
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
 from apps.dashboards.models import Dashboard, Tenant
-from apps.ngsild.admin import DashboardNgsiLdJoinRuleAdminForm, _source_key_paths
+from apps.ngsild.admin import (
+    DashboardNgsiLdNormalizedEntityAdmin,
+    DashboardNgsiLdJoinRuleAdminForm,
+    _normalize_types_payload,
+    _source_joinable_fields,
+)
 
 from .client import fetch_entities
 from .models import (
@@ -256,11 +264,11 @@ class NgsiLdJoinRuleAdminFormTests(TestCase):
             },
         )
 
-    def test_source_key_paths_include_nested_payload_paths(self):
-        paths = _source_key_paths(self.left_source.id, "Panneau")
-        self.assertIn("segmentId.value", paths)
-        self.assertIn("metadata.network.id", paths)
-        self.assertIn("id", paths)
+    def test_source_joinable_fields_include_table_columns_and_nested_payload_paths(self):
+        fields = dict(_source_joinable_fields(self.left_source.id, "Panneau"))
+        self.assertIn("column.entity_id", fields)
+        self.assertIn("payload.segmentId.value", fields)
+        self.assertIn("payload.metadata.network.id", fields)
 
     def test_join_rule_form_accepts_valid_dropdown_values(self):
         form = DashboardNgsiLdJoinRuleAdminForm(
@@ -270,10 +278,10 @@ class NgsiLdJoinRuleAdminFormTests(TestCase):
                 "is_active": "on",
                 "left_source": str(self.left_source.id),
                 "left_entity_type": "Panneau",
-                "left_key_path": "segmentId.value",
+                "left_key_path": "payload.segmentId.value",
                 "right_source": str(self.right_source.id),
                 "right_entity_type": "Troncon",
-                "right_key_path": "id",
+                "right_key_path": "column.entity_id",
                 "join_kind": DashboardNgsiLdJoinRule.JoinKind.LEFT,
                 "description": "",
             }
@@ -289,10 +297,10 @@ class NgsiLdJoinRuleAdminFormTests(TestCase):
                 "is_active": "on",
                 "left_source": str(self.left_source.id),
                 "left_entity_type": "Panneau",
-                "left_key_path": "wrong.path",
+                "left_key_path": "payload.wrong.path",
                 "right_source": str(self.right_source.id),
                 "right_entity_type": "Troncon",
-                "right_key_path": "id",
+                "right_key_path": "column.entity_id",
                 "join_kind": DashboardNgsiLdJoinRule.JoinKind.LEFT,
                 "description": "",
             }
@@ -300,3 +308,60 @@ class NgsiLdJoinRuleAdminFormTests(TestCase):
 
         self.assertFalse(form.is_valid())
         self.assertIn("left_key_path", form.errors)
+
+
+class NgsiLdNormalizedEntitiesCascadeTests(TestCase):
+    def setUp(self):
+        self.dashboard = Dashboard.objects.create(
+            tenant=Tenant.objects.create(slug="tenant-cascade", name="Tenant Cascade"),
+            slug="cascade-dashboard",
+            title="Cascade Dashboard",
+            description="",
+        )
+        self.source = DashboardNgsiLdSource.objects.create(dashboard=self.dashboard, tenant="urn:tenant:one")
+        user_model = get_user_model()
+        self.admin = user_model.objects.create_superuser(
+            username="admin-cascade",
+            email="admin@example.com",
+            password="admin-pass",
+        )
+        self.factory = RequestFactory()
+        self.admin_view = DashboardNgsiLdNormalizedEntityAdmin(
+            DashboardNgsiLdNormalizedEntity,
+            AdminSite(),
+        )
+
+    def test_normalize_types_payload_extracts_type_and_attributes(self):
+        payload = [
+            {
+                "id": "Panneau",
+                "attrs": [
+                    {"id": "segmentId"},
+                    {"id": "scope"},
+                ],
+            },
+            "Camera",
+        ]
+        normalized = _normalize_types_payload(payload)
+        self.assertEqual(normalized[0]["type"], "Camera")
+        self.assertEqual(normalized[1]["type"], "Panneau")
+        self.assertEqual(normalized[1]["attribute_count"], 2)
+        self.assertIn("segmentId", normalized[1]["attributes"])
+
+    @patch("apps.ngsild.admin.fetch_types_metadata")
+    def test_types_cascade_endpoint_returns_types(self, mock_fetch_types):
+        mock_fetch_types.return_value = [
+            {"id": "Panneau", "attrs": [{"id": "segmentId"}, {"id": "scope"}]},
+        ]
+        request = self.factory.get(
+            "/admin/ngsild/dashboardngsildnormalizedentity/types-cascade/",
+            data={"source_id": str(self.source.id), "tenant": "urn:tenant:one"},
+        )
+        request.user = self.admin
+        response = self.admin_view.types_cascade_view(request)
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content.decode("utf-8"))
+        self.assertEqual(body["source_id"], self.source.id)
+        self.assertEqual(body["tenant"], "urn:tenant:one")
+        self.assertEqual(len(body["types"]), 1)
+        self.assertEqual(body["types"][0]["type"], "Panneau")
