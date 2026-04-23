@@ -47,12 +47,15 @@
     }
   }
 
-  async function fetchOptions(sourceId, entityType) {
+  async function fetchOptions(sourceId, tenant, entityType) {
     if (!sourceId) {
-      return { entity_types: [], joinable_fields: [] };
+      return { tenants: [], entity_types: [], joinable_fields: [] };
     }
 
     const params = new URLSearchParams({ source_id: sourceId });
+    if (tenant) {
+      params.set("tenant", tenant);
+    }
     if (entityType) {
       params.set("entity_type", entityType);
     }
@@ -69,57 +72,99 @@
     return response.json();
   }
 
+  function ensureRefreshButton(side) {
+    const keyPathSelect = document.getElementById(`id_${side}_key_path`);
+    if (!keyPathSelect) return null;
+
+    let button = document.getElementById(`id_${side}_refresh_options`);
+    if (button) return button;
+
+    button = document.createElement("button");
+    button.type = "button";
+    button.id = `id_${side}_refresh_options`;
+    button.textContent = "Rafraichir options";
+    button.style.marginTop = "6px";
+    button.style.padding = "4px 8px";
+    button.style.cursor = "pointer";
+    keyPathSelect.parentElement.appendChild(button);
+    return button;
+  }
+
   async function refreshSide(side) {
     const sourceSelect = document.getElementById(`id_${side}_source`);
+    const tenantSelect = document.getElementById(`id_${side}_tenant`);
     const entityTypeSelect = document.getElementById(`id_${side}_entity_type`);
     const keyPathSelect = document.getElementById(`id_${side}_key_path`);
-    if (!sourceSelect || !entityTypeSelect || !keyPathSelect) return;
+    if (!sourceSelect || !tenantSelect || !entityTypeSelect || !keyPathSelect) return;
 
-    const payload = await fetchOptions(sourceSelect.value, entityTypeSelect.value || "");
+    const payload = await fetchOptions(sourceSelect.value, tenantSelect.value || "", entityTypeSelect.value || "");
+    setOptions(tenantSelect, payload.tenants || [], tenantSelect.value);
     setOptions(entityTypeSelect, payload.entity_types || [], entityTypeSelect.value);
 
-    const secondPayload = await fetchOptions(sourceSelect.value, entityTypeSelect.value || "");
+    const secondPayload = await fetchOptions(sourceSelect.value, tenantSelect.value || "", entityTypeSelect.value || "");
     setOptions(keyPathSelect, secondPayload.joinable_fields || [], keyPathSelect.value);
   }
 
   async function onSourceChange(side) {
     const sourceSelect = document.getElementById(`id_${side}_source`);
+    const tenantSelect = document.getElementById(`id_${side}_tenant`);
     const entityTypeSelect = document.getElementById(`id_${side}_entity_type`);
     const keyPathSelect = document.getElementById(`id_${side}_key_path`);
-    if (!sourceSelect || !entityTypeSelect || !keyPathSelect) return;
+    if (!sourceSelect || !tenantSelect || !entityTypeSelect || !keyPathSelect) return;
 
-    const payload = await fetchOptions(sourceSelect.value, "");
+    const payload = await fetchOptions(sourceSelect.value, "", "");
+    setOptions(tenantSelect, payload.tenants || [], "");
     setOptions(entityTypeSelect, payload.entity_types || [], "");
     setOptions(keyPathSelect, [], "");
+  }
 
-    if (entityTypeSelect.value) {
-      const secondPayload = await fetchOptions(sourceSelect.value, entityTypeSelect.value);
-      setOptions(keyPathSelect, secondPayload.joinable_fields || [], keyPathSelect.value);
-    }
+  async function onTenantChange(side) {
+    const sourceSelect = document.getElementById(`id_${side}_source`);
+    const tenantSelect = document.getElementById(`id_${side}_tenant`);
+    const entityTypeSelect = document.getElementById(`id_${side}_entity_type`);
+    const keyPathSelect = document.getElementById(`id_${side}_key_path`);
+    if (!sourceSelect || !tenantSelect || !entityTypeSelect || !keyPathSelect) return;
+
+    const payload = await fetchOptions(sourceSelect.value, tenantSelect.value || "", "");
+    setOptions(entityTypeSelect, payload.entity_types || [], "");
+    setOptions(keyPathSelect, [], "");
   }
 
   async function onEntityTypeChange(side) {
     const sourceSelect = document.getElementById(`id_${side}_source`);
+    const tenantSelect = document.getElementById(`id_${side}_tenant`);
     const entityTypeSelect = document.getElementById(`id_${side}_entity_type`);
     const keyPathSelect = document.getElementById(`id_${side}_key_path`);
-    if (!sourceSelect || !entityTypeSelect || !keyPathSelect) return;
+    if (!sourceSelect || !tenantSelect || !entityTypeSelect || !keyPathSelect) return;
 
-    const payload = await fetchOptions(sourceSelect.value, entityTypeSelect.value || "");
+    const payload = await fetchOptions(sourceSelect.value, tenantSelect.value || "", entityTypeSelect.value || "");
     setOptions(keyPathSelect, payload.joinable_fields || [], keyPathSelect.value);
   }
 
   function wireSide(side) {
     const sourceSelect = document.getElementById(`id_${side}_source`);
+    const tenantSelect = document.getElementById(`id_${side}_tenant`);
     const entityTypeSelect = document.getElementById(`id_${side}_entity_type`);
-    if (!sourceSelect || !entityTypeSelect) return;
+    if (!sourceSelect || !tenantSelect || !entityTypeSelect) return;
 
     sourceSelect.addEventListener("change", () => {
       void onSourceChange(side);
     });
 
+    tenantSelect.addEventListener("change", () => {
+      void onTenantChange(side);
+    });
+
     entityTypeSelect.addEventListener("change", () => {
       void onEntityTypeChange(side);
     });
+
+    const refreshButton = ensureRefreshButton(side);
+    if (refreshButton) {
+      refreshButton.addEventListener("click", () => {
+        void refreshSide(side);
+      });
+    }
 
     void refreshSide(side);
   }

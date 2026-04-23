@@ -3,7 +3,12 @@
   if (!root) return;
 
   const endpoint = root.dataset.endpoint;
-  const sources = JSON.parse(root.dataset.sources || "[]");
+  let sources = [];
+  try {
+    sources = JSON.parse(root.dataset.sources || "[]");
+  } catch (_error) {
+    sources = [];
+  }
 
   const sourceSelect = document.getElementById("ngsild-source-select");
   const tenantSelect = document.getElementById("ngsild-tenant-select");
@@ -129,11 +134,26 @@
   }
 
   function initialize() {
-    const sourceOptions = [{ value: "", label: "Selectionner un source" }].concat(
-      sources.map((source) => ({ value: String(source.id), label: source.label })),
-    );
-    replaceOptions(sourceSelect, sourceOptions, "");
-    replaceOptions(tenantSelect, [{ value: "", label: "Tenant par defaut du source" }], "");
+    if (sources.length === 0 && sourceSelect.options.length > 1) {
+      sources = Array.from(sourceSelect.options)
+        .filter((opt) => opt.value)
+        .map((opt) => ({ id: opt.value, label: opt.textContent, tenants: [] }));
+    }
+
+    if (sourceSelect.options.length <= 1) {
+      const sourceOptions = [{ value: "", label: "Selectionner un source" }].concat(
+        sources.map((source) => ({ value: String(source.id), label: source.label })),
+      );
+      replaceOptions(sourceSelect, sourceOptions, "");
+    }
+
+    if (tenantSelect.options.length === 0) {
+      replaceOptions(tenantSelect, [{ value: "", label: "Tenant par defaut du source" }], "");
+    }
+
+    if (sources.length === 0) {
+      setStatus("Aucune source disponible. Configure d'abord 'Dashboard NGSI-LD sources'.", true);
+    }
 
     sourceSelect.addEventListener("change", onSourceChange);
     tenantSelect.addEventListener("change", () => {

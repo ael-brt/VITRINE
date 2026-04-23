@@ -10,17 +10,24 @@
 >
   <h2 style="margin-top: 0;">Exploration Types NGSI-LD Par Tenant</h2>
   <p style="margin: 0 0 10px;">
-    Cascade: <strong>source</strong> → <strong>tenant</strong> → <strong>types</strong> → <strong>attributs</strong>
+    Cascade: <strong>source</strong> -> <strong>tenant</strong> -> <strong>types</strong> -> <strong>attributs</strong>
   </p>
 
   <div style="display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
     <label>
       Source<br />
-      <select id="ngsild-source-select" style="width: 100%;"></select>
+      <select id="ngsild-source-select" style="width: 100%;">
+        <option value="">Selectionner un source</option>
+        {% for source in ngsild_sources %}
+        <option value="{{ source.id }}">{{ source.label }}</option>
+        {% endfor %}
+      </select>
     </label>
     <label>
       Tenant<br />
-      <select id="ngsild-tenant-select" style="width: 100%;"></select>
+      <select id="ngsild-tenant-select" style="width: 100%;">
+        <option value="">Tenant par defaut du source</option>
+      </select>
     </label>
   </div>
 

@@ -63,7 +63,28 @@ def _extract_json_paths(payload, *, max_depth=4, prefix=""):
     return paths
 
 
-def _source_entity_types(source_id: int | None) -> list[str]:
+def _source_tenants(source_id: int | None) -> list[str]:
+    if not source_id:
+        return []
+
+    values = set(
+        DashboardNgsiLdNormalizedEntity.objects.filter(source_id=source_id)
+        .exclude(tenant="")
+        .values_list("tenant", flat=True)
+        .distinct()
+    )
+    source_tenant = (
+        DashboardNgsiLdSource.objects.filter(id=source_id)
+        .exclude(tenant="")
+        .values_list("tenant", flat=True)
+        .first()
+    )
+    if source_tenant:
+        values.add(source_tenant)
+    return sorted(value for value in values if value)
+
+
+def _source_entity_types(source_id: int | None, tenant: str | None = None) -> list[str]:
     if not source_id:
         return []
 
@@ -83,20 +104,25 @@ def _source_entity_types(source_id: int | None) -> list[str]:
         DashboardNgsiLdEntityType.objects.filter(source_id=source_id, is_active=True)
         .values_list("entity_type", flat=True)
     )
-    values.update(
-        DashboardNgsiLdNormalizedEntity.objects.filter(source_id=source_id)
-        .values_list("entity_type", flat=True)
-        .distinct()
-    )
+    normalized_qs = DashboardNgsiLdNormalizedEntity.objects.filter(source_id=source_id)
+    if tenant:
+        normalized_qs = normalized_qs.filter(tenant=tenant)
+    values.update(normalized_qs.values_list("entity_type", flat=True).distinct())
 
     return sorted(value for value in values if value)
 
 
-def _source_payload_key_paths(source_id: int | None, entity_type: str | None) -> list[str]:
+def _source_payload_key_paths(
+    source_id: int | None,
+    entity_type: str | None,
+    tenant: str | None = None,
+) -> list[str]:
     if not source_id:
         return []
 
     queryset = DashboardNgsiLdNormalizedEntity.objects.filter(source_id=source_id)
+    if tenant:
+        queryset = queryset.filter(tenant=tenant)
     if entity_type:
         queryset = queryset.filter(entity_type=entity_type)
 
@@ -108,11 +134,15 @@ def _source_payload_key_paths(source_id: int | None, entity_type: str | None) ->
     return sorted(value for value in values if value)
 
 
-def _source_joinable_fields(source_id: int | None, entity_type: str | None) -> list[tuple[str, str]]:
+def _source_joinable_fields(
+    source_id: int | None,
+    entity_type: str | None,
+    tenant: str | None = None,
+) -> list[tuple[str, str]]:
     if not source_id:
         return []
 
-    payload_paths = _source_payload_key_paths(source_id, entity_type)
+    payload_paths = _source_payload_key_paths(source_id, entity_type, tenant=tenant)
     choices = [(f"column.{field_name}", f"Colonne table: {field_name}") for field_name in TABLE_JOIN_FIELDS]
     choices.extend((f"payload.{path}", f"Key path payload: {path}") for path in payload_paths)
     return choices
@@ -126,6 +156,8 @@ class DashboardNgsiLdJoinRuleAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        self.fields["left_tenant"] = forms.ChoiceField(required=False, choices=())
+        self.fields["right_tenant"] = forms.ChoiceField(required=False, choices=())
         self.fields["left_entity_type"] = forms.ChoiceField(required=True, choices=())
         self.fields["right_entity_type"] = forms.ChoiceField(required=True, choices=())
         self.fields["left_key_path"] = forms.ChoiceField(required=True, choices=())
@@ -134,16 +166,25 @@ class DashboardNgsiLdJoinRuleAdminForm(forms.ModelForm):
         left_source_id = self._bound_source_id("left_source", self.instance.left_source_id)
         right_source_id = self._bound_source_id("right_source", self.instance.right_source_id)
 
-        left_types = _source_entity_types(left_source_id)
-        right_types = _source_entity_types(right_source_id)
+        left_tenant = self._bound_value("left_tenant", "")
+        right_tenant = self._bound_value("right_tenant", "")
+        left_tenants = _source_tenants(left_source_id)
+        right_tenants = _source_tenants(right_source_id)
+        self.fields["left_tenant"].choices = [("", "Tenant (tous/default)")] + self._choices(left_tenants)
+        self.fields["right_tenant"].choices = [("", "Tenant (tous/default)")] + self._choices(right_tenants)
+        self.fields["left_tenant"].help_text = "Selectionne un tenant puis clique Rafraichir options."
+        self.fields["right_tenant"].help_text = "Selectionne un tenant puis clique Rafraichir options."
+
+        left_types = _source_entity_types(left_source_id, tenant=left_tenant or None)
+        right_types = _source_entity_types(right_source_id, tenant=right_tenant or None)
         self.fields["left_entity_type"].choices = self._choices(left_types)
         self.fields["right_entity_type"].choices = self._choices(right_types)
 
         left_entity_type = self._bound_value("left_entity_type", self.instance.left_entity_type)
         right_entity_type = self._bound_value("right_entity_type", self.instance.right_entity_type)
 
-        left_join_fields = _source_joinable_fields(left_source_id, left_entity_type)
-        right_join_fields = _source_joinable_fields(right_source_id, right_entity_type)
+        left_join_fields = _source_joinable_fields(left_source_id, left_entity_type, tenant=left_tenant or None)
+        right_join_fields = _source_joinable_fields(right_source_id, right_entity_type, tenant=right_tenant or None)
         self.fields["left_key_path"].choices = left_join_fields
         self.fields["right_key_path"].choices = right_join_fields
         self.fields["left_key_path"].help_text = (
@@ -174,23 +215,44 @@ class DashboardNgsiLdJoinRuleAdminForm(forms.ModelForm):
         cleaned = super().clean()
         left_source = cleaned.get("left_source")
         right_source = cleaned.get("right_source")
+        left_tenant = cleaned.get("left_tenant")
+        right_tenant = cleaned.get("right_tenant")
 
         left_type = cleaned.get("left_entity_type")
         right_type = cleaned.get("right_entity_type")
         left_key_path = cleaned.get("left_key_path")
         right_key_path = cleaned.get("right_key_path")
 
-        if left_source and left_type not in _source_entity_types(left_source.id):
+        if left_source and left_tenant and left_tenant not in _source_tenants(left_source.id):
+            self.add_error("left_tenant", "Tenant invalide pour la source gauche.")
+        if right_source and right_tenant and right_tenant not in _source_tenants(right_source.id):
+            self.add_error("right_tenant", "Tenant invalide pour la source droite.")
+
+        if left_source and left_type not in _source_entity_types(left_source.id, tenant=left_tenant or None):
             self.add_error("left_entity_type", "Type d'entite invalide pour la source gauche.")
-        if right_source and right_type not in _source_entity_types(right_source.id):
+        if right_source and right_type not in _source_entity_types(right_source.id, tenant=right_tenant or None):
             self.add_error("right_entity_type", "Type d'entite invalide pour la source droite.")
 
         if left_source:
-            left_allowed = {value for value, _label in _source_joinable_fields(left_source.id, left_type)}
+            left_allowed = {
+                value
+                for value, _label in _source_joinable_fields(
+                    left_source.id,
+                    left_type,
+                    tenant=left_tenant or None,
+                )
+            }
             if left_key_path not in left_allowed:
                 self.add_error("left_key_path", "Champ de jointure invalide pour la source/type de gauche.")
         if right_source:
-            right_allowed = {value for value, _label in _source_joinable_fields(right_source.id, right_type)}
+            right_allowed = {
+                value
+                for value, _label in _source_joinable_fields(
+                    right_source.id,
+                    right_type,
+                    tenant=right_tenant or None,
+                )
+            }
             if right_key_path not in right_allowed:
                 self.add_error("right_key_path", "Champ de jointure invalide pour la source/type de droite.")
 
@@ -262,6 +324,21 @@ class DashboardNgsiLdSourceAdmin(admin.ModelAdmin):
 @admin.register(DashboardNgsiLdJoinRule)
 class DashboardNgsiLdJoinRuleAdmin(admin.ModelAdmin):
     form = DashboardNgsiLdJoinRuleAdminForm
+    fields = (
+        "dashboard",
+        "name",
+        "is_active",
+        "join_kind",
+        "description",
+        "left_source",
+        "left_tenant",
+        "left_entity_type",
+        "left_key_path",
+        "right_source",
+        "right_tenant",
+        "right_entity_type",
+        "right_key_path",
+    )
     list_display = (
         "name",
         "dashboard",
@@ -291,16 +368,19 @@ class DashboardNgsiLdJoinRuleAdmin(admin.ModelAdmin):
 
     def join_options_view(self, request):
         source_raw = request.GET.get("source_id")
+        tenant = (request.GET.get("tenant") or "").strip()
         entity_type = request.GET.get("entity_type") or None
         try:
             source_id = int(source_raw) if source_raw else None
         except (TypeError, ValueError):
             source_id = None
 
-        entity_types = _source_entity_types(source_id)
-        joinable_fields = _source_joinable_fields(source_id, entity_type)
+        tenants = _source_tenants(source_id)
+        entity_types = _source_entity_types(source_id, tenant=tenant or None)
+        joinable_fields = _source_joinable_fields(source_id, entity_type, tenant=tenant or None)
         return JsonResponse(
             {
+                "tenants": tenants,
                 "entity_types": entity_types,
                 "joinable_fields": [{"value": value, "label": label} for value, label in joinable_fields],
             }
@@ -420,6 +500,7 @@ class DashboardNgsiLdNormalizedEntityAdmin(admin.ModelAdmin):
         extra_context = extra_context or {}
         extra_context.update(
             {
+                "ngsild_sources": source_payload,
                 "ngsild_sources_json": json.dumps(source_payload),
                 "ngsild_types_cascade_endpoint": "../types-cascade/",
             }
