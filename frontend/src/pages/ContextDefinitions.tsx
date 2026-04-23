@@ -58,7 +58,7 @@ type GraphEdge = {
   id: string;
   source: string;
   target: string;
-  relation: "definie_dans" | "domaine" | "contenue";
+  relation: "definie_dans" | "a_pour_entite" | "contenue";
 };
 
 type GraphModel = {
@@ -180,12 +180,12 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
 
     const entityKey = `${item.sourceFile}||${item.entityTerm}||${item.entityUri}`;
     const entityNode = entityIds.get(entityKey);
-    if (entityNode && domainNode) {
+    if (entityNode) {
       edges.push({
-        id: `domaine:${domainNode.id}->${entityNode.id}`,
-        source: domainNode.id,
+        id: `a_pour_entite:${propertyId}->${entityNode.id}`, 
+        source: propertyId,
         target: entityNode.id,
-        relation: "domaine",
+        relation: "a_pour_entite",
       });
     }
   });
@@ -223,8 +223,8 @@ function OntologyGraph({ items }: OntologyGraphProps) {
       <p className={styles.sectionSubtitle}>
         Les URI sont des attributs de noeuds de proprietes. Un noeud intermediaire indique ou la
         propriete est definie (<code>cerema</code>, <code>schema.org</code>, etc). Relations:
-        <code>definie_dans</code> (propriete → domaine), <code>domaine</code> (domaine → entite),
-        puis <code>contenue</code> (entite → fichier).
+        <code>definie_dans</code> (propriete vers domaine), <code>a_pour_entite</code> (propriete vers entite),
+        puis <code>contenue</code> (entite vers fichier).
         Les proprietes internes CEREMA et les references externes sont toutes deux affichees.
       </p>
 
