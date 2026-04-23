@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import URLError
@@ -42,6 +43,20 @@ def _cache_timeout_seconds() -> int:
         return 300
 
 
+def _remote_timeout_seconds() -> int:
+    try:
+        return max(2, int(os.getenv("ONTOLOGY_REMOTE_TIMEOUT_SECONDS", "5")))
+    except Exception:
+        return 5
+
+
+def _remote_budget_seconds() -> int:
+    try:
+        return max(3, int(os.getenv("ONTOLOGY_REMOTE_BUDGET_SECONDS", "12")))
+    except Exception:
+        return 12
+
+
 def _normalize_token(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "", value).lower()
     return cleaned
@@ -69,7 +84,7 @@ def _http_get_json(url: str) -> Any:
         },
         method="GET",
     )
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=_remote_timeout_seconds()) as response:
         raw = response.read().decode("utf-8")
         try:
             return json.loads(raw)
@@ -86,7 +101,7 @@ def _http_get_text(url: str) -> str:
         },
         method="GET",
     )
-    with urlopen(request, timeout=20) as response:
+    with urlopen(request, timeout=_remote_timeout_seconds()) as response:
         return response.read().decode("utf-8")
 
 
@@ -241,7 +256,18 @@ def _load_context_catalog() -> ContextCatalog:
 
     files.sort()
 
+    deadline = time.monotonic() + _remote_budget_seconds()
+    consecutive_failures = 0
+
     for path in files:
+        if time.monotonic() >= deadline:
+            skipped_files.append(
+                {
+                    "file": "__budget__",
+                    "reason": "Remote context loading budget exceeded; returned partial catalog.",
+                }
+            )
+            break
         try:
             raw = _http_get_text(f"{RAW_BASE_URL}{path}")
             try:
@@ -298,8 +324,19 @@ def _load_context_catalog() -> ContextCatalog:
                         entity_to_uri.setdefault(normalized_entity, candidate_uri)
 
             context_property_map[path] = file_property_map
+            consecutive_failures = 0
         except Exception as exc:
             skipped_files.append({"file": path, "reason": str(exc)})
+            consecutive_failures += 1
+            # Fail fast on repeated remote errors to avoid upstream timeout.
+            if consecutive_failures >= 3:
+                skipped_files.append(
+                    {
+                        "file": "__remote__",
+                        "reason": "Too many consecutive remote errors; stopped remote loading early.",
+                    }
+                )
+                break
 
     catalog = ContextCatalog(
         files=files,
@@ -327,8 +364,6 @@ def get_ontology_definitions(
     if isinstance(cached, dict):
         return cached
 
-    catalog = _load_context_catalog()
-
     query = DashboardNgsiLdNormalizedEntity.objects.all().only(
         "dashboard_slug",
         "tenant",
@@ -353,6 +388,9 @@ def get_ontology_definitions(
             if prop_name.startswith("@") or prop_name in {"id", "type"}:
                 continue
             entity_properties[key].add(prop_name)
+
+    # Build a backend-only baseline first (always fast), then enrich with contexts if possible.
+    catalog = _load_context_catalog()
 
     property_links: list[dict[str, Any]] = []
     for (row_dashboard_slug, row_entity_type), properties in sorted(entity_properties.items()):
@@ -400,4 +438,3 @@ def get_ontology_definitions(
     }
     cache.set(cache_key, response, timeout=_cache_timeout_seconds())
     return response
-
