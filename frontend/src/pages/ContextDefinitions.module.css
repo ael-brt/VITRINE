@@ -222,6 +222,10 @@
   fill: #2c4f7c;
 }
 
+.nodeDomain {
+  fill: #6b7280;
+}
+
 .nodeFile {
   fill: #7b4b2b;
 }

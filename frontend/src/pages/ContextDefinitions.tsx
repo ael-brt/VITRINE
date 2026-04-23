@@ -51,14 +51,14 @@ type GraphNode = {
   x: number;
   y: number;
   isInternalProperty?: boolean;
-  kind: "property" | "entity" | "file";
+  kind: "property" | "domain" | "entity" | "file";
 };
 
 type GraphEdge = {
   id: string;
   source: string;
   target: string;
-  relation: "domaine" | "contenue";
+  relation: "definie_dans" | "domaine" | "contenue";
 };
 
 type GraphModel = {
@@ -83,6 +83,7 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
 
   const fileIds = new Map<string, GraphNode>();
   const entityIds = new Map<string, GraphNode>();
+  const domainIds = new Map<string, GraphNode>();
   const propertyIds = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
 
@@ -94,9 +95,10 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
     new Set(selected.map((item) => `${item.sourceFile}||${item.entityTerm}||${item.entityUri}`)),
   ).sort((a, b) => a.localeCompare(b));
 
-  const fileX = 170;
-  const entityX = 740;
-  const propertyX = 1310;
+  const fileX = 130;
+  const entityX = 560;
+  const domainX = 970;
+  const propertyX = 1410;
   const fileSpacing = 54;
   const entitySpacing = 38;
   const propertySpacing = 34;
@@ -138,6 +140,20 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
     }
   });
 
+  const domainList = Array.from(
+    new Set(selected.map((item) => item.definitionSource || "unknown")),
+  ).sort((a, b) => a.localeCompare(b));
+
+  domainList.forEach((domain, index) => {
+    domainIds.set(domain, {
+      id: `domain:${domain}`,
+      label: domain,
+      x: domainX,
+      y: basePadding + (index + 1) * 56,
+      kind: "domain",
+    });
+  });
+
   selected.forEach((item, index) => {
     const propertyId = `property:${item.sourceFile}||${item.term}||${item.uri}`;
     const node: GraphNode = {
@@ -151,12 +167,23 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
     };
     propertyIds.set(propertyId, node);
 
+    const domainKey = item.definitionSource || "unknown";
+    const domainNode = domainIds.get(domainKey);
+    if (domainNode) {
+      edges.push({
+        id: `definie_dans:${propertyId}->${domainNode.id}`,
+        source: propertyId,
+        target: domainNode.id,
+        relation: "definie_dans",
+      });
+    }
+
     const entityKey = `${item.sourceFile}||${item.entityTerm}||${item.entityUri}`;
     const entityNode = entityIds.get(entityKey);
-    if (entityNode) {
+    if (entityNode && domainNode) {
       edges.push({
-        id: `domaine:${propertyId}->${entityNode.id}`,
-        source: propertyId,
+        id: `domaine:${domainNode.id}->${entityNode.id}`,
+        source: domainNode.id,
         target: entityNode.id,
         relation: "domaine",
       });
@@ -164,7 +191,7 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
   });
 
   return {
-    nodes: [...fileIds.values(), ...entityIds.values(), ...propertyIds.values()],
+    nodes: [...fileIds.values(), ...entityIds.values(), ...domainIds.values(), ...propertyIds.values()],
     edges,
     width,
     height,
@@ -194,9 +221,10 @@ function OntologyGraph({ items }: OntologyGraphProps) {
     <section className={styles.section}>
       <h2 className={styles.sectionTitle}>Modele graphe de l'ontologie</h2>
       <p className={styles.sectionSubtitle}>
-        Les URI sont des attributs de noeuds de proprietes. Chaque propriete est reliee a son
-        entite par la relation <code>domaine</code>. Chaque entite est reliee au fichier
-        <code>-context.jsonld</code> par la relation <code>contenue</code>.
+        Les URI sont des attributs de noeuds de proprietes. Un noeud intermediaire indique ou la
+        propriete est definie (<code>cerema</code>, <code>schema.org</code>, etc). Relations:
+        <code>definie_dans</code> (propriete → domaine), <code>domaine</code> (domaine → entite),
+        puis <code>contenue</code> (entite → fichier).
         Les proprietes internes CEREMA et les references externes sont toutes deux affichees.
       </p>
 
@@ -225,7 +253,7 @@ function OntologyGraph({ items }: OntologyGraphProps) {
                   x2={target.x}
                   y2={target.y}
                   className={
-                    edge.relation === "domaine" ? styles.edgeDefinition : styles.edgeAlias
+                    edge.relation === "contenue" ? styles.edgeAlias : styles.edgeDefinition
                   }
                 />
                 <text x={midX} y={midY - 2} className={styles.edgeLabel} textAnchor="middle">
@@ -243,6 +271,8 @@ function OntologyGraph({ items }: OntologyGraphProps) {
                     ? node.isInternalProperty
                       ? styles.nodeTerm
                       : styles.nodeTermExternal
+                    : node.kind === "domain"
+                      ? styles.nodeDomain
                     : node.kind === "entity"
                       ? styles.nodeUri
                       : styles.nodeFile
