@@ -5,9 +5,16 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.dashboards.models import Dashboard, Tenant
+from apps.ngsild.admin import DashboardNgsiLdJoinRuleAdminForm, _source_key_paths
 
 from .client import fetch_entities
-from .models import DashboardNgsiLdEntityType, DashboardNgsiLdSource, DashboardNgsiLdSyncJob
+from .models import (
+    DashboardNgsiLdEntityType,
+    DashboardNgsiLdJoinRule,
+    DashboardNgsiLdNormalizedEntity,
+    DashboardNgsiLdSource,
+    DashboardNgsiLdSyncJob,
+)
 from .service import get_dashboard_data
 from .sync import enqueue_due_sync_jobs, run_pending_sync_jobs, sync_source_now
 
@@ -214,3 +221,82 @@ class NgsiLdClientPaginationTests(TestCase):
         self.assertIn("offset=0", first_call_url)
         self.assertIn("limit=3", second_call_url)
         self.assertIn("offset=3", second_call_url)
+
+
+class NgsiLdJoinRuleAdminFormTests(TestCase):
+    def setUp(self):
+        self.dashboard = Dashboard.objects.create(
+            tenant=Tenant.objects.create(slug="tenant-join", name="Tenant Join"),
+            slug="join-dashboard",
+            title="Join Dashboard",
+            description="",
+        )
+        self.dashboard_right = Dashboard.objects.create(
+            tenant=Tenant.objects.create(slug="tenant-join-right", name="Tenant Join Right"),
+            slug="join-dashboard-right",
+            title="Join Dashboard Right",
+            description="",
+        )
+        self.left_source = DashboardNgsiLdSource.objects.create(dashboard=self.dashboard, tenant="left")
+        self.right_source = DashboardNgsiLdSource.objects.create(dashboard=self.dashboard_right, tenant="right")
+        DashboardNgsiLdEntityType.objects.create(source=self.left_source, entity_type="Panneau", is_active=True)
+        DashboardNgsiLdEntityType.objects.create(source=self.right_source, entity_type="Troncon", is_active=True)
+
+        DashboardNgsiLdNormalizedEntity.objects.create(
+            source=self.left_source,
+            dashboard_slug=self.dashboard.slug,
+            tenant="left",
+            entity_type="Panneau",
+            entity_id="urn:ngsi-ld:Panneau:1",
+            join_key="SEG-001",
+            entity_payload={
+                "id": "urn:ngsi-ld:Panneau:1",
+                "segmentId": {"type": "Property", "value": "SEG-001"},
+                "metadata": {"network": {"id": "NET-1"}},
+            },
+        )
+
+    def test_source_key_paths_include_nested_payload_paths(self):
+        paths = _source_key_paths(self.left_source.id, "Panneau")
+        self.assertIn("segmentId.value", paths)
+        self.assertIn("metadata.network.id", paths)
+        self.assertIn("id", paths)
+
+    def test_join_rule_form_accepts_valid_dropdown_values(self):
+        form = DashboardNgsiLdJoinRuleAdminForm(
+            data={
+                "dashboard": str(self.dashboard.id),
+                "name": "rule-1",
+                "is_active": "on",
+                "left_source": str(self.left_source.id),
+                "left_entity_type": "Panneau",
+                "left_key_path": "segmentId.value",
+                "right_source": str(self.right_source.id),
+                "right_entity_type": "Troncon",
+                "right_key_path": "id",
+                "join_kind": DashboardNgsiLdJoinRule.JoinKind.LEFT,
+                "description": "",
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors.as_json())
+
+    def test_join_rule_form_rejects_invalid_key_path(self):
+        form = DashboardNgsiLdJoinRuleAdminForm(
+            data={
+                "dashboard": str(self.dashboard.id),
+                "name": "rule-2",
+                "is_active": "on",
+                "left_source": str(self.left_source.id),
+                "left_entity_type": "Panneau",
+                "left_key_path": "wrong.path",
+                "right_source": str(self.right_source.id),
+                "right_entity_type": "Troncon",
+                "right_key_path": "id",
+                "join_kind": DashboardNgsiLdJoinRule.JoinKind.LEFT,
+                "description": "",
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("left_key_path", form.errors)
