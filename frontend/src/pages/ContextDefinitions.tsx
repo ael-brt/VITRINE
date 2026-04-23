@@ -95,10 +95,10 @@ function buildGraphModel(items: InternalPropertyLink[]): GraphModel {
     new Set(selected.map((item) => `${item.sourceFile}||${item.entityTerm}||${item.entityUri}`)),
   ).sort((a, b) => a.localeCompare(b));
 
-  const fileX = 130;
-  const entityX = 560;
-  const domainX = 970;
-  const propertyX = 1410;
+  const fileX = 110;
+  const entityX = 430;
+  const propertyX = 930;
+  const domainX = 1430;
   const fileSpacing = 54;
   const entitySpacing = 38;
   const propertySpacing = 34;
