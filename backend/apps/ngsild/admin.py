@@ -149,6 +149,9 @@ def _source_joinable_fields(
 
 
 class DashboardNgsiLdJoinRuleAdminForm(forms.ModelForm):
+    left_tenant = forms.ChoiceField(required=False, choices=())
+    right_tenant = forms.ChoiceField(required=False, choices=())
+
     class Meta:
         model = DashboardNgsiLdJoinRule
         fields = "__all__"
@@ -156,8 +159,6 @@ class DashboardNgsiLdJoinRuleAdminForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.fields["left_tenant"] = forms.ChoiceField(required=False, choices=())
-        self.fields["right_tenant"] = forms.ChoiceField(required=False, choices=())
         self.fields["left_entity_type"] = forms.ChoiceField(required=True, choices=())
         self.fields["right_entity_type"] = forms.ChoiceField(required=True, choices=())
         self.fields["left_key_path"] = forms.ChoiceField(required=True, choices=())
