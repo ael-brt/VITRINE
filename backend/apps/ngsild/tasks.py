@@ -14,6 +14,10 @@ def enqueue_due_sync_jobs_task() -> dict[str, int]:
 
 @shared_task(name="apps.ngsild.run_pending_sync_jobs_task")
 def run_pending_sync_jobs_task() -> dict[str, int]:
+    auto_run_enabled = os.getenv("NGSILD_SYNC_AUTO_RUN_PENDING", "false").lower() == "true"
+    if not auto_run_enabled:
+        return {"processed": 0, "success": 0, "failed": 0}
+
     try:
         limit = int(os.getenv("NGSILD_SYNC_RUN_LIMIT", "20"))
     except Exception:

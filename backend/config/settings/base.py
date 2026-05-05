@@ -159,13 +159,17 @@ try:
 except Exception:
     NGSILD_SYNC_RUN_SECONDS = 60
 
+NGSILD_SYNC_AUTO_RUN_PENDING = os.getenv("NGSILD_SYNC_AUTO_RUN_PENDING", "false").lower() == "true"
+
 CELERY_BEAT_SCHEDULE = {
     "ngsild-enqueue-due-sync-jobs": {
         "task": "apps.ngsild.enqueue_due_sync_jobs_task",
         "schedule": max(10, NGSILD_SYNC_ENQUEUE_SECONDS),
     },
-    "ngsild-run-pending-sync-jobs": {
+}
+
+if NGSILD_SYNC_AUTO_RUN_PENDING:
+    CELERY_BEAT_SCHEDULE["ngsild-run-pending-sync-jobs"] = {
         "task": "apps.ngsild.run_pending_sync_jobs_task",
         "schedule": max(10, NGSILD_SYNC_RUN_SECONDS),
-    },
-}
+    }
