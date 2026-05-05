@@ -176,6 +176,25 @@ class NgsiLdSyncTests(TestCase):
         )
         self.assertEqual(ids, ["urn:ngsi-ld:Panneau:2"])
 
+    @patch("apps.ngsild.sync.fetch_entities")
+    def test_sync_deduplicates_entities_by_id_within_same_batch(self, mock_fetch_entities):
+        mock_fetch_entities.return_value = [
+            {"id": "urn:ngsi-ld:Panneau:1", "scope": "zone-a"},
+            {"id": "urn:ngsi-ld:Panneau:1", "scope": "zone-b"},
+            {"id": "urn:ngsi-ld:Panneau:2"},
+        ]
+        summary = sync_source_now(self.source, mode=DashboardNgsiLdSource.SyncMode.INCREMENTAL)
+        self.assertEqual(summary["success"], 1)
+
+        from .models import DashboardNgsiLdNormalizedEntity
+
+        rows = list(
+            DashboardNgsiLdNormalizedEntity.objects.filter(source=self.source, entity_type="Panneau")
+            .order_by("entity_id")
+            .values_list("entity_id", "scope")
+        )
+        self.assertEqual(rows, [("urn:ngsi-ld:Panneau:1", "zone-b"), ("urn:ngsi-ld:Panneau:2", "")])
+
 
 class NgsiLdClientPaginationTests(TestCase):
     @patch("apps.ngsild.client.fetch_access_token", return_value="token")
@@ -214,3 +233,39 @@ class NgsiLdClientPaginationTests(TestCase):
         self.assertIn("offset=0", first_call_url)
         self.assertIn("limit=3", second_call_url)
         self.assertIn("offset=3", second_call_url)
+
+
+class NgsiLdSyncConcurrencyTests(TestCase):
+    @patch("apps.ngsild.sync.fetch_entities")
+    def test_same_pending_job_is_claimed_once(self, mock_fetch_entities):
+        mock_fetch_entities.return_value = [{"id": "urn:ngsi-ld:Panneau:1"}]
+
+        dashboard = Dashboard.objects.create(
+            tenant=Tenant.objects.create(slug="tenant-concurrency", name="Tenant Concurrency"),
+            slug="concurrency",
+            title="Concurrency",
+            description="",
+        )
+        source = DashboardNgsiLdSource.objects.create(
+            dashboard=dashboard,
+            tenant="urn:ngsi-ld:tenant:concurrency",
+            request_limit=10,
+            is_active=True,
+        )
+        job = DashboardNgsiLdSyncJob.objects.create(
+            source=source,
+            entity_type="Panneau",
+            status=DashboardNgsiLdSyncJob.Status.PENDING,
+        )
+
+        first_snapshot = DashboardNgsiLdSyncJob.objects.get(id=job.id)
+        second_snapshot = DashboardNgsiLdSyncJob.objects.get(id=job.id)
+
+        from .sync import run_sync_job
+
+        run_sync_job(first_snapshot)
+        run_sync_job(second_snapshot)
+
+        final_job = DashboardNgsiLdSyncJob.objects.get(id=job.id)
+        self.assertEqual(final_job.status, DashboardNgsiLdSyncJob.Status.SUCCESS)
+        self.assertEqual(mock_fetch_entities.call_count, 1)

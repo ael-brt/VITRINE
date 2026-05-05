@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.utils.html import format_html
+from django.utils import timezone
 
 from .models import (
     DashboardNgsiLdEntityType,
@@ -7,7 +9,8 @@ from .models import (
     DashboardNgsiLdSource,
     DashboardNgsiLdSyncJob,
 )
-from .sync import enqueue_sync_jobs_for_source, run_sync_job
+from .sync import enqueue_sync_jobs_for_source
+from .tasks import run_sync_job_task
 
 
 class DashboardNgsiLdEntityTypeInline(admin.TabularInline):
@@ -93,8 +96,10 @@ class DashboardNgsiLdSyncJobAdmin(admin.ModelAdmin):
     list_display = (
         "source",
         "entity_type",
-        "status",
+        "status_badge",
         "triggered_by",
+        "progress_summary",
+        "duration_summary",
         "records_read",
         "records_upserted",
         "started_at",
@@ -118,15 +123,55 @@ class DashboardNgsiLdSyncJobAdmin(admin.ModelAdmin):
     )
     actions = ("run_selected_pending_jobs",)
 
+    class Media:
+        css = {"all": ("ngsild/admin_sync_jobs.css",)}
+        js = ("ngsild/admin_sync_jobs.js",)
+
+    @admin.display(ordering="status", description="status")
+    def status_badge(self, obj: DashboardNgsiLdSyncJob) -> str:
+        status = (obj.status or "").strip().lower()
+        label = obj.get_status_display() if hasattr(obj, "get_status_display") else (obj.status or "")
+        return format_html(
+            '<span class="ngsild-status-badge ngsild-status-{}">{}</span>',
+            status,
+            label,
+        )
+
+    @admin.display(description="progress")
+    def progress_summary(self, obj: DashboardNgsiLdSyncJob) -> str:
+        if obj.records_read <= 0:
+            return "-"
+        percent = min(100, int((obj.records_upserted / obj.records_read) * 100))
+        return f"{obj.records_upserted}/{obj.records_read} ({percent}%)"
+
+    @admin.display(description="duration")
+    def duration_summary(self, obj: DashboardNgsiLdSyncJob) -> str:
+        if not obj.started_at:
+            return "-"
+        end_at = obj.finished_at or timezone.now()
+        seconds = int(max(0, (end_at - obj.started_at).total_seconds()))
+        minutes, sec = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours}h {minutes:02d}m {sec:02d}s"
+        if minutes:
+            return f"{minutes}m {sec:02d}s"
+        return f"{sec}s"
+
     @admin.action(description="Run selected pending sync jobs now")
     def run_selected_pending_jobs(self, request, queryset):
-        processed = 0
+        queued = 0
+        skipped = 0
         for job in queryset.select_related("source", "source__dashboard"):
             if job.status != DashboardNgsiLdSyncJob.Status.PENDING:
+                skipped += 1
                 continue
-            run_sync_job(job)
-            processed += 1
-        self.message_user(request, f"Executed {processed} pending job(s).")
+            run_sync_job_task.delay(job.id)
+            queued += 1
+        self.message_user(
+            request,
+            f"Queued {queued} pending job(s) for background execution. Skipped {skipped} non-pending job(s).",
+        )
 
 
 @admin.register(DashboardNgsiLdNormalizedEntity)

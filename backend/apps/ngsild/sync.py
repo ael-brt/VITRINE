@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import uuid4
 
 from django.db import transaction
 from django.utils.dateparse import parse_datetime
@@ -9,6 +10,21 @@ from django.utils import timezone
 from .client import fetch_entities
 from .models import DashboardNgsiLdNormalizedEntity, DashboardNgsiLdSource, DashboardNgsiLdSyncJob
 from .service import build_source_overrides, resolve_source_entity_types
+
+def _claim_pending_job(job_id: int) -> DashboardNgsiLdSyncJob | None:
+    now = timezone.now()
+    updated = DashboardNgsiLdSyncJob.objects.filter(
+        id=job_id,
+        status=DashboardNgsiLdSyncJob.Status.PENDING,
+    ).update(
+        status=DashboardNgsiLdSyncJob.Status.RUNNING,
+        started_at=now,
+        finished_at=None,
+        error_message="",
+    )
+    if updated != 1:
+        return None
+    return DashboardNgsiLdSyncJob.objects.select_related("source", "source__dashboard").get(id=job_id)
 
 
 def enqueue_sync_jobs_for_source(
@@ -71,7 +87,8 @@ def _upsert_normalized_entities(
     entity_type: str,
     entities: list[dict],
     full_mode: bool,
-) -> int:
+    sync_run_id: str,
+) -> tuple[int, int, int]:
     def _extract_datetime(value):
         if isinstance(value, dict):
             value = value.get("value")
@@ -101,11 +118,20 @@ def _upsert_normalized_entities(
             return value[:255]
         return ""
 
-    valid_entities = []
+    deduped_entities: dict[str, dict] = {}
+    invalid_count = 0
+    duplicate_count = 0
     for entity in entities:
         entity_id = entity.get("id")
         if not isinstance(entity_id, str) or not entity_id:
+            invalid_count += 1
             continue
+        if entity_id in deduped_entities:
+            duplicate_count += 1
+        deduped_entities[entity_id] = entity
+
+    valid_entities = []
+    for entity_id, entity in deduped_entities.items():
         valid_entities.append(
             DashboardNgsiLdNormalizedEntity(
                 source=source,
@@ -116,17 +142,12 @@ def _upsert_normalized_entities(
                 join_key=_extract_join_key(entity),
                 scope=_extract_scope(entity),
                 ngsi_updated_at=_extract_datetime(entity.get("modifiedAt") or entity.get("observedAt")),
+                sync_run_id=sync_run_id,
                 entity_payload=entity,
             )
         )
 
     with transaction.atomic():
-        if full_mode:
-            DashboardNgsiLdNormalizedEntity.objects.filter(
-                source=source,
-                entity_type=entity_type,
-            ).delete()
-
         if valid_entities:
             DashboardNgsiLdNormalizedEntity.objects.bulk_create(
                 valid_entities,
@@ -138,45 +159,62 @@ def _upsert_normalized_entities(
                     "join_key",
                     "scope",
                     "ngsi_updated_at",
+                    "sync_run_id",
                     "entity_payload",
                     "updated_at",
                 ],
                 unique_fields=["source", "entity_type", "entity_id"],
             )
 
-    return len(valid_entities)
+        if full_mode:
+            DashboardNgsiLdNormalizedEntity.objects.filter(
+                source=source,
+                entity_type=entity_type,
+            ).exclude(sync_run_id=sync_run_id).delete()
+
+    return len(valid_entities), duplicate_count, invalid_count
 
 
 def run_sync_job(job: DashboardNgsiLdSyncJob) -> DashboardNgsiLdSyncJob:
-    job.status = DashboardNgsiLdSyncJob.Status.RUNNING
-    job.started_at = timezone.now()
-    job.error_message = ""
-    job.save(update_fields=["status", "started_at", "error_message"])
+    if job.status == DashboardNgsiLdSyncJob.Status.PENDING:
+        claimed = _claim_pending_job(job.id)
+        if claimed is None:
+            return DashboardNgsiLdSyncJob.objects.get(id=job.id)
+        job = claimed
+    elif job.status != DashboardNgsiLdSyncJob.Status.RUNNING:
+        return job
 
     try:
         full_mode = job.source.sync_mode == DashboardNgsiLdSource.SyncMode.FULL
+        sync_run_id = uuid4().hex
         entities = fetch_entities(
             entity_type=job.entity_type,
             limit=job.source.request_limit,
             overrides=build_source_overrides(job.source),
         )
         read_count = len(entities)
-        upserted_count = _upsert_normalized_entities(
+        upserted_count, duplicate_count, invalid_count = _upsert_normalized_entities(
             source=job.source,
             entity_type=job.entity_type,
             entities=entities,
             full_mode=full_mode,
+            sync_run_id=sync_run_id,
         )
 
         job.status = DashboardNgsiLdSyncJob.Status.SUCCESS
         job.records_read = read_count
         job.records_upserted = upserted_count
+        if duplicate_count or invalid_count:
+            job.error_message = (
+                f"Non-fatal normalization notes: duplicates={duplicate_count}, invalid={invalid_count}"
+            )
         job.finished_at = timezone.now()
         job.save(
             update_fields=[
                 "status",
                 "records_read",
                 "records_upserted",
+                "error_message",
                 "finished_at",
             ]
         )

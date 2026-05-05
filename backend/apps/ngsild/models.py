@@ -179,6 +179,7 @@ class DashboardNgsiLdNormalizedEntity(models.Model):
     join_key = models.CharField(max_length=255, blank=True, db_index=True)
     scope = models.CharField(max_length=255, blank=True)
     ngsi_updated_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    sync_run_id = models.CharField(max_length=64, blank=True, db_index=True)
     entity_payload = models.JSONField(default=dict)
 
     ingested_at = models.DateTimeField(auto_now_add=True)
@@ -189,6 +190,7 @@ class DashboardNgsiLdNormalizedEntity(models.Model):
         unique_together = ("source", "entity_type", "entity_id")
         indexes = [
             models.Index(fields=["source", "entity_type"]),
+            models.Index(fields=["source", "entity_type", "sync_run_id"]),
             models.Index(fields=["dashboard_slug", "entity_type"]),
             models.Index(fields=["tenant", "entity_type"]),
             models.Index(fields=["entity_type", "join_key"]),
