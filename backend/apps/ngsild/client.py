@@ -269,3 +269,39 @@ def fetch_entities(
         next_url = urljoin(settings.base_url, f"entities?{next_params}")
 
     return entities
+
+
+def fetch_types_metadata(
+    *,
+    overrides: dict[str, str | int | None] | None = None,
+    details: bool = True,
+) -> list[dict[str, Any]] | dict[str, Any]:
+    settings = read_settings(overrides=overrides)
+    token = fetch_access_token(settings)
+
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    if settings.context_link:
+        headers["Link"] = settings.context_link
+    if settings.tenant:
+        headers[settings.tenant_header] = settings.tenant
+
+    params = {"details": "true"} if details else {}
+    suffix = f"?{urlencode(params)}" if params else ""
+    url = urljoin(settings.base_url, f"types{suffix}")
+
+    payload, _response_headers = _json_request(
+        method="GET",
+        url=url,
+        headers=headers,
+        body=None,
+        timeout_seconds=settings.timeout_seconds,
+    )
+
+    if payload is None:
+        return []
+    if isinstance(payload, (list, dict)):
+        return payload
+    raise NgsiLdClientError("NGSI-LD types response is not a list/dict.")
