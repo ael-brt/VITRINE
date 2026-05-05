@@ -30,16 +30,23 @@ else:
     raise SystemExit("Database is not reachable.")
 PY
 
-echo "Running migrations..."
-python manage.py migrate --noinput
+if [ "${SKIP_INIT_TASKS:-false}" != "true" ]; then
+  echo "Running migrations..."
+  python manage.py migrate --noinput
 
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
+  echo "Collecting static files..."
+  python manage.py collectstatic --noinput
 
-if [ "${INIT_FIXTURES:-false}" = "true" ]; then
-  echo "Loading fixtures..."
-  python manage.py loaddata apps/dashboards/fixtures/initial_dashboards.json || true
-  python manage.py loaddata apps/projects/fixtures/initial_projects.json || true
+  if [ "${INIT_FIXTURES:-false}" = "true" ]; then
+    echo "Loading fixtures..."
+    python manage.py loaddata apps/dashboards/fixtures/initial_dashboards.json || true
+    python manage.py loaddata apps/projects/fixtures/initial_projects.json || true
+  fi
+fi
+
+if [ "$#" -gt 0 ]; then
+  echo "Starting service: $*"
+  exec "$@"
 fi
 
 echo "Starting API..."
