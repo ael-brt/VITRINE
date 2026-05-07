@@ -7,16 +7,24 @@ from django.urls import path
 import json
 
 from .client import NgsiLdClientError, fetch_types_metadata
+from .join_views import JoinViewError, ensure_join_relation
 from .models import (
     DashboardNgsiLdEntityType,
     DashboardNgsiLdJoinRule,
     DashboardNgsiLdNormalizedEntity,
     DashboardNgsiLdSource,
+    DashboardNgsiLdSqlRelation,
     DashboardNgsiLdSyncJob,
 )
+from .sql_relations import SqlRelationError, deploy_sql_relation, refresh_sql_relation
 from .service import build_source_overrides
 from .sync import enqueue_sync_jobs_for_source
-from .tasks import run_sync_job_task
+from .tasks import (
+    deploy_sql_relation_task,
+    refresh_join_relation_task,
+    refresh_sql_relation_task,
+    run_sync_job_task,
+)
 
 
 DEFAULT_KEY_PATHS = (
@@ -170,8 +178,8 @@ class DashboardNgsiLdJoinRuleAdminForm(forms.ModelForm):
         left_source_id = self._bound_source_id("left_source", self.instance.left_source_id)
         right_source_id = self._bound_source_id("right_source", self.instance.right_source_id)
 
-        left_tenant = self._bound_value("left_tenant", "")
-        right_tenant = self._bound_value("right_tenant", "")
+        left_tenant = self._bound_value("left_tenant", self.instance.left_tenant)
+        right_tenant = self._bound_value("right_tenant", self.instance.right_tenant)
         left_tenants = _source_tenants(left_source_id)
         right_tenants = _source_tenants(right_source_id)
         self.fields["left_tenant"].choices = [("", "Tenant (tous/default)")] + self._choices(left_tenants)
@@ -333,6 +341,12 @@ class DashboardNgsiLdJoinRuleAdmin(admin.ModelAdmin):
         "name",
         "is_active",
         "join_kind",
+        "storage_mode",
+        "auto_refresh_enabled",
+        "db_relation_name",
+        "last_refreshed_at",
+        "last_refresh_status",
+        "last_refresh_error",
         "description",
         "left_source",
         "left_tenant",
@@ -347,6 +361,10 @@ class DashboardNgsiLdJoinRuleAdmin(admin.ModelAdmin):
         "name",
         "dashboard",
         "join_kind",
+        "storage_mode",
+        "auto_refresh_enabled",
+        "last_refreshed_at",
+        "last_refresh_status",
         "left_source",
         "right_source",
         "is_active",
@@ -355,6 +373,8 @@ class DashboardNgsiLdJoinRuleAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "join_kind")
     search_fields = ("name", "dashboard__slug", "left_entity_type", "right_entity_type")
     autocomplete_fields = ("dashboard", "left_source", "right_source")
+    readonly_fields = ("db_relation_name", "last_refreshed_at", "last_refresh_status", "last_refresh_error")
+    actions = ("refresh_selected_materialized_views",)
 
     class Media:
         js = ("ngsild/join_rule_admin.js",)
@@ -389,6 +409,33 @@ class DashboardNgsiLdJoinRuleAdmin(admin.ModelAdmin):
                 "joinable_fields": [{"value": value, "label": label} for value, label in joinable_fields],
             }
         )
+
+    @admin.action(description="Refresh selected materialized views")
+    def refresh_selected_materialized_views(self, request, queryset):
+        queued = 0
+        skipped = 0
+        for rule in queryset.select_related("dashboard"):
+            if rule.storage_mode != DashboardNgsiLdJoinRule.StorageMode.MATERIALIZED_VIEW:
+                skipped += 1
+                continue
+            refresh_join_relation_task.delay(rule.id)
+            queued += 1
+        self.message_user(
+            request,
+            f"Queued refresh for {queued} materialized view rule(s). Skipped {skipped} non-materialized rule(s).",
+        )
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        try:
+            ensure_join_relation(obj)
+            obj.last_refresh_status = "ready"
+            obj.last_refresh_error = ""
+            obj.save(update_fields=["db_relation_name", "last_refresh_status", "last_refresh_error"])
+        except JoinViewError as exc:
+            obj.last_refresh_status = "failed"
+            obj.last_refresh_error = str(exc)
+            obj.save(update_fields=["last_refresh_status", "last_refresh_error"])
 
 
 @admin.register(DashboardNgsiLdSyncJob)
@@ -589,6 +636,74 @@ class DashboardNgsiLdNormalizedEntityAdmin(admin.ModelAdmin):
                 "types": _normalize_types_payload(payload),
             }
         )
+
+
+@admin.register(DashboardNgsiLdSqlRelation)
+class DashboardNgsiLdSqlRelationAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "dashboard",
+        "slug",
+        "storage_mode",
+        "auto_refresh_enabled",
+        "last_refreshed_at",
+        "last_refresh_status",
+        "is_active",
+        "updated_at",
+    )
+    list_filter = ("is_active", "storage_mode", "auto_refresh_enabled", "last_refresh_status")
+    search_fields = ("name", "slug", "dashboard__slug", "db_relation_name")
+    autocomplete_fields = ("dashboard",)
+    readonly_fields = ("db_relation_name", "last_refreshed_at", "last_refresh_status", "last_refresh_error")
+    fields = (
+        "dashboard",
+        "name",
+        "slug",
+        "is_active",
+        "storage_mode",
+        "auto_refresh_enabled",
+        "sql_query",
+        "db_relation_name",
+        "last_refreshed_at",
+        "last_refresh_status",
+        "last_refresh_error",
+    )
+    actions = ("deploy_selected_relations", "refresh_selected_materialized_relations")
+
+    @admin.action(description="Deploy selected SQL relations")
+    def deploy_selected_relations(self, request, queryset):
+        queued = 0
+        for relation in queryset.select_related("dashboard"):
+            deploy_sql_relation_task.delay(relation.id)
+            queued += 1
+        self.message_user(request, f"Queued deployment for {queued} relation(s).")
+
+    @admin.action(description="Refresh selected materialized SQL relations")
+    def refresh_selected_materialized_relations(self, request, queryset):
+        queued = 0
+        skipped = 0
+        for relation in queryset.select_related("dashboard"):
+            if relation.storage_mode != DashboardNgsiLdSqlRelation.StorageMode.MATERIALIZED_VIEW:
+                skipped += 1
+                continue
+            refresh_sql_relation_task.delay(relation.id)
+            queued += 1
+        self.message_user(
+            request,
+            f"Queued refresh for {queued} materialized relation(s). Skipped {skipped} live view relation(s).",
+        )
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        try:
+            deploy_sql_relation(obj)
+            obj.last_refresh_status = "ready"
+            obj.last_refresh_error = ""
+            obj.save(update_fields=["db_relation_name", "last_refresh_status", "last_refresh_error"])
+        except SqlRelationError as exc:
+            obj.last_refresh_status = "failed"
+            obj.last_refresh_error = str(exc)
+            obj.save(update_fields=["last_refresh_status", "last_refresh_error"])
 
 
 def _normalize_types_payload(payload):

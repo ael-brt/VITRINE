@@ -72,6 +72,9 @@ class DashboardNgsiLdJoinRule(models.Model):
     class JoinKind(models.TextChoices):
         INNER = "inner", "Inner"
         LEFT = "left", "Left"
+    class StorageMode(models.TextChoices):
+        LIVE_VIEW = "live_view", "Live view"
+        MATERIALIZED_VIEW = "materialized_view", "Materialized view"
 
     dashboard = models.ForeignKey(
         "dashboards.Dashboard",
@@ -86,6 +89,7 @@ class DashboardNgsiLdJoinRule(models.Model):
         on_delete=models.CASCADE,
         related_name="join_rules_left",
     )
+    left_tenant = models.CharField(max_length=255, blank=True)
     left_entity_type = models.CharField(max_length=120)
     left_key_path = models.CharField(
         max_length=255,
@@ -97,6 +101,7 @@ class DashboardNgsiLdJoinRule(models.Model):
         on_delete=models.CASCADE,
         related_name="join_rules_right",
     )
+    right_tenant = models.CharField(max_length=255, blank=True)
     right_entity_type = models.CharField(max_length=120)
     right_key_path = models.CharField(
         max_length=255,
@@ -108,6 +113,16 @@ class DashboardNgsiLdJoinRule(models.Model):
         choices=JoinKind.choices,
         default=JoinKind.LEFT,
     )
+    storage_mode = models.CharField(
+        max_length=30,
+        choices=StorageMode.choices,
+        default=StorageMode.LIVE_VIEW,
+    )
+    auto_refresh_enabled = models.BooleanField(default=False)
+    db_relation_name = models.CharField(max_length=120, blank=True)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+    last_refresh_status = models.CharField(max_length=20, blank=True)
+    last_refresh_error = models.TextField(blank=True)
     description = models.TextField(blank=True)
 
     updated_at = models.DateTimeField(auto_now=True)
@@ -191,6 +206,7 @@ class DashboardNgsiLdNormalizedEntity(models.Model):
         indexes = [
             models.Index(fields=["source", "entity_type"]),
             models.Index(fields=["source", "entity_type", "sync_run_id"]),
+            models.Index(fields=["source", "entity_type", "join_key"]),
             models.Index(fields=["dashboard_slug", "entity_type"]),
             models.Index(fields=["tenant", "entity_type"]),
             models.Index(fields=["entity_type", "join_key"]),
@@ -201,3 +217,44 @@ class DashboardNgsiLdNormalizedEntity(models.Model):
 
     def __str__(self) -> str:
         return f"{self.source.dashboard.slug}:{self.entity_type}:{self.entity_id}"
+
+
+class DashboardNgsiLdSqlRelation(models.Model):
+    class StorageMode(models.TextChoices):
+        LIVE_VIEW = "live_view", "Live view"
+        MATERIALIZED_VIEW = "materialized_view", "Materialized view"
+
+    dashboard = models.ForeignKey(
+        "dashboards.Dashboard",
+        on_delete=models.CASCADE,
+        related_name="ngsild_sql_relations",
+    )
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=120)
+    is_active = models.BooleanField(default=True)
+    storage_mode = models.CharField(
+        max_length=30,
+        choices=StorageMode.choices,
+        default=StorageMode.LIVE_VIEW,
+    )
+    auto_refresh_enabled = models.BooleanField(default=False)
+    sql_query = models.TextField(
+        help_text="Write a SELECT query only. It will be used to create a DB view or materialized view."
+    )
+
+    db_relation_name = models.CharField(max_length=120, blank=True)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+    last_refresh_status = models.CharField(max_length=20, blank=True)
+    last_refresh_error = models.TextField(blank=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["dashboard__slug", "slug"]
+        unique_together = ("dashboard", "slug")
+        verbose_name = "Dashboard NGSI-LD SQL relation"
+        verbose_name_plural = "Dashboard NGSI-LD SQL relations"
+
+    def __str__(self) -> str:
+        return f"{self.dashboard.slug}:{self.slug}"

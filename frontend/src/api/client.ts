@@ -1,6 +1,7 @@
 import type {
   Dashboard,
   DashboardData,
+  DashboardJoinKpisData,
   DashboardKpisData,
   DashboardMapData,
   Media,
@@ -97,6 +98,19 @@ type ApiDashboardKpisData = {
     entity_type: string;
     count: number;
   }>;
+};
+
+type ApiDashboardJoinedData = {
+  dashboard_slug: string;
+  rule?: {
+    name?: string;
+  } | null;
+  scalable_mode?: boolean;
+  join_evaluation_mode?: string;
+  total_left_rows?: number;
+  total_matched_left_rows?: number | null;
+  matched_items?: number;
+  unmatched_items?: number;
 };
 
 function toMedia(items: ApiProject["media"]): Media[] {
@@ -203,6 +217,19 @@ function toDashboardKpisData(item: ApiDashboardKpisData): DashboardKpisData {
   };
 }
 
+function toDashboardJoinKpisData(item: ApiDashboardJoinedData): DashboardJoinKpisData {
+  return {
+    dashboardSlug: item.dashboard_slug,
+    ruleName: item.rule?.name ?? null,
+    scalableMode: item.scalable_mode ?? false,
+    joinEvaluationMode: item.join_evaluation_mode ?? "unknown",
+    totalLeftRows: item.total_left_rows ?? 0,
+    totalMatchedLeftRows: item.total_matched_left_rows ?? null,
+    matchedItems: item.matched_items ?? 0,
+    unmatchedItems: item.unmatched_items ?? 0,
+  };
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const token = getAuthToken();
   const headers: HeadersInit = token ? { Authorization: `Token ${token}` } : {};
@@ -292,4 +319,19 @@ export async function fetchDashboardKpis(
   });
   const payload = await fetchJson<ApiDashboardKpisData>(`/dashboards/${slug}/kpis/${query}`);
   return toDashboardKpisData(payload);
+}
+
+export async function fetchDashboardJoinKpis(
+  slug: string,
+  params: {
+    rule?: string | null;
+  } = {},
+): Promise<DashboardJoinKpisData> {
+  const query = buildQuery({
+    rule: params.rule,
+    page: 1,
+    page_size: 1,
+  });
+  const payload = await fetchJson<ApiDashboardJoinedData>(`/dashboards/${slug}/joined/${query}`);
+  return toDashboardJoinKpisData(payload);
 }

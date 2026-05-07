@@ -82,3 +82,14 @@ export type DashboardKpisData = {
   latestNgsiUpdatedAt: string | null;
   countsByType: Array<{ entityType: string; count: number }>;
 };
+
+export type DashboardJoinKpisData = {
+  dashboardSlug: string;
+  ruleName: string | null;
+  scalableMode: boolean;
+  joinEvaluationMode: string;
+  totalLeftRows: number;
+  totalMatchedLeftRows: number | null;
+  matchedItems: number;
+  unmatchedItems: number;
+};

@@ -2,7 +2,9 @@ import os
 
 from celery import shared_task
 
-from .models import DashboardNgsiLdSyncJob
+from .join_views import JoinViewError, refresh_join_relation
+from .models import DashboardNgsiLdJoinRule, DashboardNgsiLdSqlRelation, DashboardNgsiLdSyncJob
+from .sql_relations import SqlRelationError, deploy_sql_relation, refresh_sql_relation
 from .sync import enqueue_due_sync_jobs, run_pending_sync_jobs, run_sync_job
 
 
@@ -64,3 +66,52 @@ def run_sync_job_task(self, job_id: int) -> dict[str, str | int]:
             result.save(update_fields=["status"])
             raise self.retry(countdown=min(120, 10 * (2 ** self.request.retries)))
     return {"job_id": job_id, "status": result.status}
+
+
+@shared_task(name="apps.ngsild.refresh_join_relation_task")
+def refresh_join_relation_task(rule_id: int) -> dict[str, str | int]:
+    try:
+        rule = DashboardNgsiLdJoinRule.objects.select_related("dashboard").get(id=rule_id)
+    except DashboardNgsiLdJoinRule.DoesNotExist:
+        return {"rule_id": rule_id, "status": "missing"}
+
+    try:
+        refresh_join_relation(rule)
+        return {"rule_id": rule_id, "status": "success"}
+    except JoinViewError as exc:
+        rule.last_refresh_status = "failed"
+        rule.last_refresh_error = str(exc)
+        rule.save(update_fields=["last_refresh_status", "last_refresh_error"])
+        return {"rule_id": rule_id, "status": "failed"}
+
+
+@shared_task(name="apps.ngsild.deploy_sql_relation_task")
+def deploy_sql_relation_task(relation_id: int) -> dict[str, str | int]:
+    try:
+        relation = DashboardNgsiLdSqlRelation.objects.select_related("dashboard").get(id=relation_id)
+    except DashboardNgsiLdSqlRelation.DoesNotExist:
+        return {"relation_id": relation_id, "status": "missing"}
+    try:
+        deploy_sql_relation(relation)
+        return {"relation_id": relation_id, "status": "success"}
+    except SqlRelationError as exc:
+        relation.last_refresh_status = "failed"
+        relation.last_refresh_error = str(exc)
+        relation.save(update_fields=["last_refresh_status", "last_refresh_error"])
+        return {"relation_id": relation_id, "status": "failed"}
+
+
+@shared_task(name="apps.ngsild.refresh_sql_relation_task")
+def refresh_sql_relation_task(relation_id: int) -> dict[str, str | int]:
+    try:
+        relation = DashboardNgsiLdSqlRelation.objects.select_related("dashboard").get(id=relation_id)
+    except DashboardNgsiLdSqlRelation.DoesNotExist:
+        return {"relation_id": relation_id, "status": "missing"}
+    try:
+        refresh_sql_relation(relation)
+        return {"relation_id": relation_id, "status": "success"}
+    except SqlRelationError as exc:
+        relation.last_refresh_status = "failed"
+        relation.last_refresh_error = str(exc)
+        relation.save(update_fields=["last_refresh_status", "last_refresh_error"])
+        return {"relation_id": relation_id, "status": "failed"}

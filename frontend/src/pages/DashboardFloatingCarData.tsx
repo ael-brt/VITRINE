@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchDashboardBySlug, fetchDashboardData } from "../api/client";
+import { fetchDashboardBySlug, fetchDashboardData, fetchDashboardJoinKpis } from "../api/client";
 import styles from "./Dashboard.module.css";
 
 const DEFAULT_TITLE = "Dashboard floatingcardata";
@@ -14,6 +14,9 @@ export function DashboardFloatingCarData() {
   const [segmentsCount, setSegmentsCount] = useState<number>(0);
   const [lineCount, setLineCount] = useState<number>(0);
   const [pointCount, setPointCount] = useState<number>(0);
+  const [joinMatchedCount, setJoinMatchedCount] = useState<number>(0);
+  const [joinUnmatchedCount, setJoinUnmatchedCount] = useState<number>(0);
+  const [joinMatchRate, setJoinMatchRate] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -21,9 +24,10 @@ export function DashboardFloatingCarData() {
 
     async function load() {
       try {
-        const [dashboard, segments] = await Promise.all([
+        const [dashboard, segments, joinKpis] = await Promise.all([
           fetchDashboardBySlug("floatingcardata"),
           fetchDashboardData("floatingcardata"),
+          fetchDashboardJoinKpis("floatingcardata"),
         ]);
 
         if (!cancelled) {
@@ -32,6 +36,13 @@ export function DashboardFloatingCarData() {
           setSegmentsCount(segments.totalEntities);
           setLineCount(segments.stats.lineCount);
           setPointCount(segments.stats.pointCount);
+          const matched = joinKpis.totalMatchedLeftRows ?? joinKpis.matchedItems;
+          const total = joinKpis.totalLeftRows || matched + joinKpis.unmatchedItems;
+          const unmatched = Math.max(0, total - matched);
+          const rate = total > 0 ? (matched / total) * 100 : 0;
+          setJoinMatchedCount(matched);
+          setJoinUnmatchedCount(unmatched);
+          setJoinMatchRate(rate);
           setError(null);
         }
       } catch (caughtError) {
@@ -77,6 +88,18 @@ export function DashboardFloatingCarData() {
         <article className={styles.stat}>
           <span className={styles.statValue}>{pointCount}</span>
           <div className={styles.statLabel}>points geolocalises</div>
+        </article>
+        <article className={styles.stat}>
+          <span className={styles.statValue}>{joinMatchedCount}</span>
+          <div className={styles.statLabel}>troncons apparies (jointure)</div>
+        </article>
+        <article className={styles.stat}>
+          <span className={styles.statValue}>{joinUnmatchedCount}</span>
+          <div className={styles.statLabel}>troncons non apparies</div>
+        </article>
+        <article className={styles.stat}>
+          <span className={styles.statValue}>{joinMatchRate.toFixed(1)}%</span>
+          <div className={styles.statLabel}>taux de match jointure</div>
         </article>
       </div>
 

@@ -4,6 +4,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .marts import kpis_mart, map_mart, timeseries_mart
+from apps.ngsild.joining import run_join_rule
+from apps.ngsild.models import DashboardNgsiLdSqlRelation
+from apps.ngsild.sql_relations import fetch_sql_relation_data, fetch_sql_relation_kpis
 from apps.ngsild.service import safe_get_dashboard_data
 
 from .models import Dashboard
@@ -106,3 +109,57 @@ class DashboardTimeseriesView(APIView):
             days=days,
         )
         return Response(payload)
+
+
+class DashboardJoinedView(APIView):
+    def get(self, request, slug: str):
+        dashboard = get_object_or_404(Dashboard, slug=slug)
+        rule_name = request.query_params.get("rule")
+        try:
+            page = int(request.query_params.get("page", "1"))
+        except Exception:
+            page = 1
+        try:
+            page_size = int(request.query_params.get("page_size", request.query_params.get("limit", "200")))
+        except Exception:
+            page_size = 200
+
+        payload = run_join_rule(
+            dashboard_slug=dashboard.slug,
+            rule_name=rule_name or None,
+            page=page,
+            page_size=page_size,
+        )
+        return Response(payload)
+
+
+class DashboardRelationDataView(APIView):
+    def get(self, request, slug: str, relation_slug: str):
+        dashboard = get_object_or_404(Dashboard, slug=slug)
+        relation = get_object_or_404(
+            DashboardNgsiLdSqlRelation.objects.select_related("dashboard"),
+            dashboard=dashboard,
+            slug=relation_slug,
+            is_active=True,
+        )
+        try:
+            page = int(request.query_params.get("page", "1"))
+        except Exception:
+            page = 1
+        try:
+            page_size = int(request.query_params.get("page_size", request.query_params.get("limit", "200")))
+        except Exception:
+            page_size = 200
+        return Response(fetch_sql_relation_data(relation, page=page, page_size=page_size))
+
+
+class DashboardRelationKpisView(APIView):
+    def get(self, request, slug: str, relation_slug: str):
+        dashboard = get_object_or_404(Dashboard, slug=slug)
+        relation = get_object_or_404(
+            DashboardNgsiLdSqlRelation.objects.select_related("dashboard"),
+            dashboard=dashboard,
+            slug=relation_slug,
+            is_active=True,
+        )
+        return Response(fetch_sql_relation_kpis(relation))

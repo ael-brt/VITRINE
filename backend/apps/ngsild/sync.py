@@ -8,7 +8,12 @@ from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 from .client import fetch_entities
-from .models import DashboardNgsiLdNormalizedEntity, DashboardNgsiLdSource, DashboardNgsiLdSyncJob
+from .models import (
+    DashboardNgsiLdJoinRule,
+    DashboardNgsiLdNormalizedEntity,
+    DashboardNgsiLdSource,
+    DashboardNgsiLdSyncJob,
+)
 from .service import build_source_overrides, resolve_source_entity_types
 
 def _claim_pending_job(job_id: int) -> DashboardNgsiLdSyncJob | None:
@@ -222,6 +227,24 @@ def run_sync_job(job: DashboardNgsiLdSyncJob) -> DashboardNgsiLdSyncJob:
         source = job.source
         source.last_synced_at = job.finished_at
         source.save(update_fields=["last_synced_at"])
+
+        auto_rules = DashboardNgsiLdJoinRule.objects.filter(
+            dashboard=source.dashboard,
+            is_active=True,
+            storage_mode=DashboardNgsiLdJoinRule.StorageMode.MATERIALIZED_VIEW,
+            auto_refresh_enabled=True,
+        ).filter(
+            left_source=source
+        ) | DashboardNgsiLdJoinRule.objects.filter(
+            dashboard=source.dashboard,
+            is_active=True,
+            storage_mode=DashboardNgsiLdJoinRule.StorageMode.MATERIALIZED_VIEW,
+            auto_refresh_enabled=True,
+            right_source=source,
+        )
+        from .tasks import refresh_join_relation_task
+        for rule in auto_rules.distinct():
+            refresh_join_relation_task.delay(rule.id)
         return job
     except Exception as exc:
         job.status = DashboardNgsiLdSyncJob.Status.FAILED
