@@ -56,7 +56,7 @@ class EnvironmentAccessGroupAdmin(admin.ModelAdmin):
 @admin.register(EntityTable)
 class EntityTableAdmin(admin.ModelAdmin):
     change_form_template = "admin/datahub/entitytable_change_form.html"
-    list_display = ("tenant", "entity_type", "environment", "table_name", "entity_count", "is_active", "import_link", "data_link", "updated_at")
+    list_display = ("tenant", "entity_type", "environment", "table_name", "entity_count", "is_active", "data_link", "updated_at")
     search_fields = ("tenant__slug", "entity_type", "table_name", "environment__slug")
     list_filter = ("tenant", "environment", "is_active")
     actions = ("ensure_schema", "drop_physical_table")
@@ -72,11 +72,6 @@ class EntityTableAdmin(admin.ModelAdmin):
         "extra_query",
         "is_active",
     )
-
-    @admin.display(description="import")
-    def import_link(self, obj: EntityTable):
-        url = reverse("admin:datahub_entity_import", args=[obj.id])
-        return format_html('<a class="button" href="{}">Import</a>', url)
 
     @admin.display(description="données")
     def data_link(self, obj: EntityTable):
@@ -144,15 +139,14 @@ class EntityTableAdmin(admin.ModelAdmin):
         urls = super().get_urls()
         custom = [
             path("<int:table_id>/import/", self.admin_site.admin_view(self.import_view), name="datahub_entity_import"),
-            path("<int:table_id>/run-import/", self.admin_site.admin_view(self.run_import_view), name="datahub_entity_run_import"),
             path("<int:table_id>/data/", self.admin_site.admin_view(self.data_view), name="datahub_entity_data"),
         ]
         return custom + urls
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         if obj and obj.pk:
-            context["run_import_url"] = reverse("admin:datahub_entity_run_import", args=[obj.pk])
-            context["run_import_default_limit"] = obj.request_limit
+            context["entity_import_url"] = reverse("admin:datahub_entity_import", args=[obj.pk])
+            context["entity_data_url"] = reverse("admin:datahub_entity_data", args=[obj.pk])
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def import_view(self, request, table_id: int):
@@ -198,51 +192,6 @@ class EntityTableAdmin(admin.ModelAdmin):
             "admin/datahub/import_form.html",
             {"form": form, "entity_table": entity_table, "title": f"Import {entity_table.tenant.slug}/{entity_table.entity_type}"},
         )
-
-    def run_import_view(self, request, table_id: int):
-        from django.shortcuts import get_object_or_404, redirect
-
-        if request.method != "POST":
-            return redirect("admin:datahub_entitytable_change", table_id)
-
-        entity_table = get_object_or_404(EntityTable, id=table_id)
-        mode = (request.POST.get("mode") or ImportRun.Mode.UPSERT).strip().lower()
-        if mode not in {ImportRun.Mode.UPSERT, ImportRun.Mode.FULL}:
-            mode = ImportRun.Mode.UPSERT
-        try:
-            limit = int(request.POST.get("ngsild_limit", str(entity_table.request_limit)))
-        except Exception:
-            limit = entity_table.request_limit
-        limit = max(1, min(limit, 5000))
-
-        tenant = entity_table.tenant
-        run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
-        try:
-            ensure_entity_table_schema(entity_table)
-            overrides = _build_fetch_overrides(tenant=tenant, entity_table=entity_table)
-            entities = fetch_entities(entity_type=entity_table.entity_type, limit=limit, overrides=overrides)
-            written, deleted = upsert_entities(
-                entity_table=entity_table,
-                tenant=tenant,
-                entity_type=entity_table.entity_type,
-                entities=entities,
-                mode=mode,
-            )
-            run.status = ImportRun.Status.SUCCESS
-            run.rows_read = len(entities)
-            run.rows_written = written
-            run.rows_deleted = deleted
-            run.finished_at = timezone.now()
-            run.save(update_fields=["status", "rows_read", "rows_written", "rows_deleted", "finished_at"])
-            self.message_user(request, f"Import success. read={len(entities)} written={written} deleted={deleted}")
-        except Exception as exc:
-            run.status = ImportRun.Status.FAILED
-            run.error_message = str(exc)
-            run.finished_at = timezone.now()
-            run.save(update_fields=["status", "error_message", "finished_at"])
-            self.message_user(request, f"Import failed: {exc}", level=messages.ERROR)
-
-        return redirect("admin:datahub_entitytable_change", table_id)
 
     def data_view(self, request, table_id: int):
         from django.shortcuts import get_object_or_404, render
