@@ -33,12 +33,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunPython(copy_dashboards_tenants_to_datahub, migrations.RunPython.noop),
         migrations.AlterField(
             model_name="dashboard",
             name="tenant",
             field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="dashboards", to="datahub.tenant"),
         ),
-        migrations.RunPython(copy_dashboards_tenants_to_datahub, migrations.RunPython.noop),
         migrations.DeleteModel(name="Tenant"),
     ]
-
