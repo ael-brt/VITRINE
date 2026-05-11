@@ -3,7 +3,14 @@
 <h1>{{ title }}</h1>
 <p>Source: <code>{{ source_name }}</code> | Objet: <strong>{{ object_label }}</strong></p>
 
+<p style="margin-bottom: 1rem;">
+  <a class="button" href="{{ base_path }}?view=table&page=1&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Table</a>
+  <a class="button" href="{{ base_path }}?view=sources&page=1&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Sources</a>
+  <span style="margin-left:.5rem;">Vue active: <strong>{{ view_mode }}</strong></span>
+</p>
+
 <form method="get" style="margin-bottom: 1rem;">
+  <input type="hidden" name="view" value="{{ view_mode }}" />
   <label for="id_q"><strong>Recherche</strong></label>
   <input id="id_q" type="text" name="q" value="{{ q }}" placeholder="entity_id / contenu texte" />
   <label for="id_page_size"><strong>Page size</strong></label>
@@ -40,11 +47,10 @@
 
 <p style="margin-top: 1rem;">
   {% if page > 1 %}
-    <a class="button" href="{{ base_path }}?page={{ page|add:-1 }}&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Précédent</a>
+    <a class="button" href="{{ base_path }}?view={{ view_mode }}&page={{ page|add:-1 }}&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Précédent</a>
   {% endif %}
   {% if rows %}
-    <a class="button" href="{{ base_path }}?page={{ page|add:1 }}&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Suivant</a>
+    <a class="button" href="{{ base_path }}?view={{ view_mode }}&page={{ page|add:1 }}&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Suivant</a>
   {% endif %}
 </p>
 {% endblock %}
-

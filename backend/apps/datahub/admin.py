@@ -185,6 +185,9 @@ class EntityTableAdmin(admin.ModelAdmin):
         from django.shortcuts import get_object_or_404, render
 
         entity_table = get_object_or_404(EntityTable, id=table_id)
+        view_mode = (request.GET.get("view") or "table").strip().lower()
+        if view_mode not in {"table", "sources"}:
+            view_mode = "table"
         page = max(1, int(request.GET.get("page", "1")))
         page_size = max(1, min(int(request.GET.get("page_size", "100")), 1000))
         offset = (page - 1) * page_size
@@ -207,6 +210,7 @@ class EntityTableAdmin(admin.ModelAdmin):
             )
             columns = [desc[0] for desc in (cursor.description or [])]
             rows = cursor.fetchall()
+        visible_columns, visible_rows = _project_preview(columns, rows, view_mode=view_mode)
 
         return render(
             request,
@@ -219,8 +223,9 @@ class EntityTableAdmin(admin.ModelAdmin):
                 "page_size": page_size,
                 "q": q,
                 "total": total,
-                "columns": columns,
-                "rows": rows,
+                "columns": visible_columns,
+                "rows": visible_rows,
+                "view_mode": view_mode,
                 "base_path": reverse("admin:datahub_entity_data", args=[entity_table.id]),
             },
         )
@@ -304,6 +309,9 @@ class SqlViewAdmin(admin.ModelAdmin):
         from django.shortcuts import get_object_or_404, render
 
         sql_view = get_object_or_404(SqlView, id=view_id)
+        view_mode = (request.GET.get("view") or "table").strip().lower()
+        if view_mode not in {"table", "sources"}:
+            view_mode = "table"
         if not sql_view.db_relation_name:
             self.message_user(request, "Deploy the SQL view before previewing data.", level=messages.ERROR)
             return render(
@@ -319,6 +327,7 @@ class SqlViewAdmin(admin.ModelAdmin):
                     "total": 0,
                     "columns": [],
                     "rows": [],
+                    "view_mode": view_mode,
                     "base_path": reverse("admin:datahub_sqlview_data", args=[sql_view.id]),
                 },
             )
@@ -334,6 +343,7 @@ class SqlViewAdmin(admin.ModelAdmin):
             cursor.execute(f"SELECT * FROM {quoted} LIMIT %s OFFSET %s", [page_size, offset])
             columns = [desc[0] for desc in (cursor.description or [])]
             rows = cursor.fetchall()
+        visible_columns, visible_rows = _project_preview(columns, rows, view_mode=view_mode)
 
         return render(
             request,
@@ -346,11 +356,28 @@ class SqlViewAdmin(admin.ModelAdmin):
                 "page_size": page_size,
                 "q": "",
                 "total": total,
-                "columns": columns,
-                "rows": rows,
+                "columns": visible_columns,
+                "rows": visible_rows,
+                "view_mode": view_mode,
                 "base_path": reverse("admin:datahub_sqlview_data", args=[sql_view.id]),
             },
         )
+
+
+def _project_preview(columns: list[str], rows: list[tuple], *, view_mode: str) -> tuple[list[str], list[tuple]]:
+    core_cols = ["id", "tenant_id", "entity_type", "entity_id"]
+    source_cols = ["search_text", "payload_json"]
+    if view_mode == "sources":
+        preferred = core_cols + source_cols
+    else:
+        hidden = set(source_cols)
+        preferred = core_cols + [col for col in columns if col not in set(core_cols) and col not in hidden]
+    selected = [col for col in preferred if col in columns]
+    if not selected:
+        return columns, rows
+    idx_map = [columns.index(col) for col in selected]
+    projected = [tuple(row[idx] for idx in idx_map) for row in rows]
+    return selected, projected
 
 @admin.register(ImportRun)
 class ImportRunAdmin(admin.ModelAdmin):

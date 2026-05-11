@@ -80,6 +80,23 @@ def _simple_value(value: Any) -> tuple[str, Any] | None:
     return None
 
 
+def _geo_value(value: Any) -> tuple[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") != "GeoProperty":
+        return None
+    geometry = value.get("value")
+    if not isinstance(geometry, dict):
+        return None
+    gtype = geometry.get("type")
+    coords = geometry.get("coordinates")
+    if not isinstance(gtype, str) or not gtype:
+        return None
+    if coords is None:
+        return None
+    return gtype, geometry
+
+
 def _safe_col(name: str) -> str:
     slug = slugify(name).replace("-", "_")
     slug = re.sub(r"_+", "_", slug).strip("_")
@@ -95,10 +112,17 @@ def ensure_columns_for_payload(entity_table: EntityTable, entity: dict[str, Any]
         if key in {"id", "type"}:
             continue
         parsed = _simple_value(value)
-        if not parsed:
+        if parsed:
+            col = _safe_col(key)
+            mapping[col] = parsed
             continue
-        col = _safe_col(key)
-        mapping[col] = parsed
+
+        geo = _geo_value(value)
+        if geo:
+            geo_type, geo_json = geo
+            base = _safe_col(key)
+            mapping[f"{base}_geo_type"] = ("text", geo_type)
+            mapping[f"{base}_geojson"] = ("jsonb", geo_json)
 
     if not mapping:
         return {}
@@ -156,13 +180,19 @@ def upsert_entities(
             values: list[Any] = [tenant.id, entity_type, entity_id, _search_text(entity), json.dumps(entity, ensure_ascii=False)]
             for col, val in typed_cols.items():
                 col_names.append(col)
-                values.append(val)
+                # psycopg raw SQL binding needs explicit serialization for jsonb placeholders.
+                if col.endswith("_geojson"):
+                    values.append(json.dumps(val, ensure_ascii=False))
+                else:
+                    values.append(val)
 
             insert_cols_sql = ", ".join(_q(col) for col in col_names)
-            # Force jsonb casting for payload_json placeholder to avoid psycopg dict adaptation errors.
+            # Force jsonb casting for payload_json and geojson placeholders.
             placeholder_parts = ["%s"] * len(col_names)
-            payload_idx = col_names.index("payload_json")
-            placeholder_parts[payload_idx] = "%s::jsonb"
+            jsonb_cols = {"payload_json"} | {name for name in col_names if name.endswith("_geojson")}
+            for idx, name in enumerate(col_names):
+                if name in jsonb_cols:
+                    placeholder_parts[idx] = "%s::jsonb"
             placeholders = ", ".join(placeholder_parts)
             update_cols = ["search_text", "payload_json"] + list(typed_cols.keys())
             update_sql = ", ".join(f"{_q(col)} = EXCLUDED.{_q(col)}" for col in update_cols) + ", updated_at = NOW()"
