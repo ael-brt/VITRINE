@@ -70,12 +70,17 @@ class EnvironmentAccessGroup(models.Model):
 
 
 class EntityTable(models.Model):
+    class ImportMode(models.TextChoices):
+        UPSERT = "upsert", "Upsert"
+        FULL = "full", "Full"
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="entity_tables")
     environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="entity_tables")
     entity_type = models.CharField(max_length=120)
     table_name = models.CharField(max_length=120, unique=True)
     endpoint_path = models.CharField(max_length=120, default="entities")
     request_limit = models.PositiveIntegerField(default=500)
+    import_mode_default = models.CharField(max_length=20, choices=ImportMode.choices, default=ImportMode.UPSERT)
     context_link_override = models.TextField(blank=True)
     extra_query = models.CharField(
         max_length=500,

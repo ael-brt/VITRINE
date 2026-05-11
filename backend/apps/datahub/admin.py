@@ -67,6 +67,7 @@ class EntityTableAdmin(admin.ModelAdmin):
         "environment",
         "table_name",
         "endpoint_path",
+        "import_mode_default",
         "request_limit",
         "context_link_override",
         "extra_query",
@@ -139,15 +140,53 @@ class EntityTableAdmin(admin.ModelAdmin):
         urls = super().get_urls()
         custom = [
             path("<int:table_id>/import/", self.admin_site.admin_view(self.import_view), name="datahub_entity_import"),
+            path("<int:table_id>/run-import/", self.admin_site.admin_view(self.run_import_view), name="datahub_entity_run_import"),
             path("<int:table_id>/data/", self.admin_site.admin_view(self.data_view), name="datahub_entity_data"),
         ]
         return custom + urls
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         if obj and obj.pk:
-            context["entity_import_url"] = reverse("admin:datahub_entity_import", args=[obj.pk])
+            context["entity_run_import_url"] = reverse("admin:datahub_entity_run_import", args=[obj.pk])
             context["entity_data_url"] = reverse("admin:datahub_entity_data", args=[obj.pk])
         return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
+
+    def run_import_view(self, request, table_id: int):
+        from django.shortcuts import get_object_or_404, redirect
+
+        if request.method != "POST":
+            return redirect("admin:datahub_entitytable_change", table_id)
+
+        entity_table = get_object_or_404(EntityTable, id=table_id)
+        tenant = entity_table.tenant
+        mode = entity_table.import_mode_default
+        limit = max(1, min(int(entity_table.request_limit), 5000))
+        run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
+        try:
+            ensure_entity_table_schema(entity_table)
+            overrides = _build_fetch_overrides(tenant=tenant, entity_table=entity_table)
+            entities = fetch_entities(entity_type=entity_table.entity_type, limit=limit, overrides=overrides)
+            written, deleted = upsert_entities(
+                entity_table=entity_table,
+                tenant=tenant,
+                entity_type=entity_table.entity_type,
+                entities=entities,
+                mode=mode,
+            )
+            run.status = ImportRun.Status.SUCCESS
+            run.rows_read = len(entities)
+            run.rows_written = written
+            run.rows_deleted = deleted
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "rows_read", "rows_written", "rows_deleted", "finished_at"])
+            self.message_user(request, f"Import success. read={len(entities)} written={written} deleted={deleted}")
+        except Exception as exc:
+            run.status = ImportRun.Status.FAILED
+            run.error_message = str(exc)
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error_message", "finished_at"])
+            self.message_user(request, f"Import failed: {exc}", level=messages.ERROR)
+        return redirect("admin:datahub_entitytable_change", table_id)
 
     def import_view(self, request, table_id: int):
         from django.shortcuts import get_object_or_404, redirect, render
