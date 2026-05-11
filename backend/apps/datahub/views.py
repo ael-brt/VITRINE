@@ -19,13 +19,14 @@ class EntityTableListView(APIView):
 
     def get(self, request):
         env_ids = user_environment_ids(request.user)
-        qs = EntityTable.objects.filter(is_active=True, environments__id__in=env_ids).distinct().order_by("entity_type")
+        qs = EntityTable.objects.select_related("environment", "tenant").filter(is_active=True, environment_id__in=env_ids).order_by("tenant__slug", "entity_type")
         items = [
             {
                 "id": row.id,
+                "tenant": row.tenant.slug,
                 "entity_type": row.entity_type,
                 "table_name": row.table_name,
-                "environments": list(row.environments.values_list("slug", flat=True)),
+                "environment": row.environment.slug,
             }
             for row in qs
         ]
@@ -36,9 +37,21 @@ class EntityTableSearchView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, entity_type: str):
-        table = get_object_or_404(EntityTable.objects.filter(is_active=True), entity_type=entity_type)
+        tenant_slug = (request.query_params.get("tenant") or "").strip()
+        qs = EntityTable.objects.select_related("tenant", "environment").filter(is_active=True, entity_type=entity_type)
+        if tenant_slug:
+            qs = qs.filter(tenant__slug=tenant_slug)
+        count = qs.count()
+        if count == 0:
+            return Response({"detail": "Entity type not found."}, status=404)
+        if count > 1 and not tenant_slug:
+            return Response(
+                {"detail": "Multiple entity tables found for this type. Add ?tenant=<tenant-slug>."},
+                status=400,
+            )
+        table = qs.first()
         env_ids = user_environment_ids(request.user)
-        if not table.environments.filter(id__in=env_ids).exists():
+        if table.environment_id not in env_ids:
             return Response({"detail": "Access denied."}, status=403)
 
         q = (request.query_params.get("q") or "").strip()
@@ -65,6 +78,8 @@ class EntityTableSearchView(APIView):
         return Response(
             {
                 "entity_type": table.entity_type,
+                "tenant": table.tenant.slug,
+                "environment": table.environment.slug,
                 "table_name": table.table_name,
                 "q": q,
                 "page": page,
@@ -73,4 +88,3 @@ class EntityTableSearchView(APIView):
                 "items": [dict(zip(columns, row)) for row in rows],
             }
         )
-

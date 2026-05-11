@@ -43,13 +43,13 @@ class Command(BaseCommand):
         limit = int(options["limit"])
 
         try:
-            entity_table = EntityTable.objects.get(entity_type=entity_type, is_active=True)
-        except EntityTable.DoesNotExist as exc:
-            raise CommandError(f"Unknown active entity type: {entity_type}") from exc
-        try:
             tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
         except Tenant.DoesNotExist as exc:
             raise CommandError(f"Unknown active tenant: {tenant_slug}") from exc
+        try:
+            entity_table = EntityTable.objects.get(entity_type=entity_type, tenant=tenant, is_active=True)
+        except EntityTable.DoesNotExist as exc:
+            raise CommandError(f"Unknown active entity type '{entity_type}' for tenant '{tenant_slug}'.") from exc
 
         run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
         try:

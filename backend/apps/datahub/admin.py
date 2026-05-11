@@ -28,7 +28,6 @@ from .table_ops import (
 
 
 class EntityImportForm(forms.Form):
-    tenant = forms.ModelChoiceField(queryset=Tenant.objects.filter(is_active=True))
     mode = forms.ChoiceField(choices=ImportRun.Mode.choices, initial=ImportRun.Mode.UPSERT)
     ngsild_limit = forms.IntegerField(min_value=1, max_value=5000, initial=500)
 
@@ -56,10 +55,22 @@ class EnvironmentAccessGroupAdmin(admin.ModelAdmin):
 
 @admin.register(EntityTable)
 class EntityTableAdmin(admin.ModelAdmin):
-    list_display = ("entity_type", "table_name", "request_limit", "is_active", "import_link", "updated_at")
-    search_fields = ("entity_type", "table_name")
-    filter_horizontal = ("environments",)
+    list_display = ("tenant", "entity_type", "environment", "table_name", "request_limit", "is_active", "import_link", "updated_at")
+    search_fields = ("tenant__slug", "entity_type", "table_name", "environment__slug")
+    list_filter = ("tenant", "environment", "is_active")
     actions = ("ensure_schema", "drop_physical_table")
+    autocomplete_fields = ("tenant", "environment")
+    fields = (
+        "tenant",
+        "entity_type",
+        "environment",
+        "table_name",
+        "endpoint_path",
+        "request_limit",
+        "context_link_override",
+        "extra_query",
+        "is_active",
+    )
 
     @admin.display(description="import")
     def import_link(self, obj: EntityTable):
@@ -127,9 +138,9 @@ class EntityTableAdmin(admin.ModelAdmin):
         if request.method == "POST":
             form = EntityImportForm(request.POST)
             if form.is_valid():
-                tenant = form.cleaned_data["tenant"]
                 mode = form.cleaned_data["mode"]
                 limit = form.cleaned_data["ngsild_limit"]
+                tenant = entity_table.tenant
                 run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
                 try:
                     ensure_entity_table_schema(entity_table)
@@ -161,7 +172,7 @@ class EntityTableAdmin(admin.ModelAdmin):
         return render(
             request,
             "admin/datahub/import_form.html",
-            {"form": form, "entity_table": entity_table, "title": f"Import {entity_table.entity_type}"},
+            {"form": form, "entity_table": entity_table, "title": f"Import {entity_table.tenant.slug}/{entity_table.entity_type}"},
         )
 
 

@@ -70,7 +70,9 @@ class EnvironmentAccessGroup(models.Model):
 
 
 class EntityTable(models.Model):
-    entity_type = models.CharField(max_length=120, unique=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="entity_tables")
+    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="entity_tables")
+    entity_type = models.CharField(max_length=120)
     table_name = models.CharField(max_length=120, unique=True)
     endpoint_path = models.CharField(max_length=120, default="entities")
     request_limit = models.PositiveIntegerField(default=500)
@@ -81,15 +83,15 @@ class EntityTable(models.Model):
         help_text="Optional additional query string fragment, example: q=speed>50",
     )
     is_active = models.BooleanField(default=True)
-    environments = models.ManyToManyField(Environment, related_name="entity_tables", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["entity_type"]
+        unique_together = (("tenant", "entity_type"),)
 
     def __str__(self) -> str:
-        return f"{self.entity_type} -> {self.table_name}"
+        return f"{self.tenant.slug}:{self.entity_type} -> {self.table_name}"
 
 
 class SqlView(models.Model):
