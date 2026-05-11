@@ -55,7 +55,7 @@ class EnvironmentAccessGroupAdmin(admin.ModelAdmin):
 
 @admin.register(EntityTable)
 class EntityTableAdmin(admin.ModelAdmin):
-    list_display = ("tenant", "entity_type", "environment", "table_name", "request_limit", "is_active", "import_link", "updated_at")
+    list_display = ("tenant", "entity_type", "environment", "table_name", "request_limit", "is_active", "import_link", "data_link", "updated_at")
     search_fields = ("tenant__slug", "entity_type", "table_name", "environment__slug")
     list_filter = ("tenant", "environment", "is_active")
     actions = ("ensure_schema", "drop_physical_table")
@@ -76,6 +76,11 @@ class EntityTableAdmin(admin.ModelAdmin):
     def import_link(self, obj: EntityTable):
         url = reverse("admin:datahub_entity_import", args=[obj.id])
         return format_html('<a class="button" href="{}">Import</a>', url)
+
+    @admin.display(description="données")
+    def data_link(self, obj: EntityTable):
+        url = reverse("admin:datahub_entity_data", args=[obj.id])
+        return format_html('<a class="button" href="{}">Voir données</a>', url)
 
     def save_model(self, request, obj, form, change):
         if not obj.table_name:
@@ -128,6 +133,7 @@ class EntityTableAdmin(admin.ModelAdmin):
         urls = super().get_urls()
         custom = [
             path("<int:table_id>/import/", self.admin_site.admin_view(self.import_view), name="datahub_entity_import"),
+            path("<int:table_id>/data/", self.admin_site.admin_view(self.data_view), name="datahub_entity_data"),
         ]
         return custom + urls
 
@@ -175,6 +181,50 @@ class EntityTableAdmin(admin.ModelAdmin):
             {"form": form, "entity_table": entity_table, "title": f"Import {entity_table.tenant.slug}/{entity_table.entity_type}"},
         )
 
+    def data_view(self, request, table_id: int):
+        from django.shortcuts import get_object_or_404, render
+
+        entity_table = get_object_or_404(EntityTable, id=table_id)
+        page = max(1, int(request.GET.get("page", "1")))
+        page_size = max(1, min(int(request.GET.get("page_size", "100")), 1000))
+        offset = (page - 1) * page_size
+        q = (request.GET.get("q") or "").strip()
+
+        where_sql = ""
+        params: list = []
+        if q:
+            where_sql = "WHERE entity_id ILIKE %s OR search_text ILIKE %s"
+            like = f"%{q}%"
+            params = [like, like]
+
+        quoted = connection.ops.quote_name(entity_table.table_name)
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT COUNT(*) FROM {quoted} {where_sql}", params)
+            total = int(cursor.fetchone()[0] or 0)
+            cursor.execute(
+                f"SELECT * FROM {quoted} {where_sql} ORDER BY id DESC LIMIT %s OFFSET %s",
+                params + [page_size, offset],
+            )
+            columns = [desc[0] for desc in (cursor.description or [])]
+            rows = cursor.fetchall()
+
+        return render(
+            request,
+            "admin/datahub/data_preview.html",
+            {
+                "title": f"Données table {entity_table.table_name}",
+                "object_label": f"{entity_table.tenant.slug}/{entity_table.entity_type}",
+                "source_name": entity_table.table_name,
+                "page": page,
+                "page_size": page_size,
+                "q": q,
+                "total": total,
+                "columns": columns,
+                "rows": rows,
+                "base_path": reverse("admin:datahub_entity_data", args=[entity_table.id]),
+            },
+        )
+
 
 def _build_fetch_overrides(*, tenant: Tenant, entity_table: EntityTable) -> dict[str, str]:
     overrides: dict[str, str] = {
@@ -200,10 +250,24 @@ def _build_fetch_overrides(*, tenant: Tenant, entity_table: EntityTable) -> dict
 
 @admin.register(SqlView)
 class SqlViewAdmin(admin.ModelAdmin):
-    list_display = ("slug", "storage_mode", "is_active", "last_refresh_status", "updated_at")
+    list_display = ("slug", "storage_mode", "is_active", "data_link", "last_refresh_status", "updated_at")
     search_fields = ("slug", "name", "db_relation_name")
     filter_horizontal = ("environments",)
     actions = ("deploy_selected", "refresh_selected")
+
+    @admin.display(description="données")
+    def data_link(self, obj: SqlView):
+        url = reverse("admin:datahub_sqlview_data", args=[obj.id])
+        return format_html('<a class="button" href="{}">Voir données</a>', url)
+
+    def get_urls(self):
+        from django.urls import path
+
+        urls = super().get_urls()
+        custom = [
+            path("<int:view_id>/data/", self.admin_site.admin_view(self.data_view), name="datahub_sqlview_data"),
+        ]
+        return custom + urls
 
     def save_model(self, request, obj, form, change):
         if not obj.db_relation_name:
@@ -235,6 +299,58 @@ class SqlViewAdmin(admin.ModelAdmin):
             except Exception as exc:
                 self.message_user(request, f"{view.slug}: {exc}", level=messages.ERROR)
         self.message_user(request, f"Refreshed {ok} materialized view(s)")
+
+    def data_view(self, request, view_id: int):
+        from django.shortcuts import get_object_or_404, render
+
+        sql_view = get_object_or_404(SqlView, id=view_id)
+        if not sql_view.db_relation_name:
+            self.message_user(request, "Deploy the SQL view before previewing data.", level=messages.ERROR)
+            return render(
+                request,
+                "admin/datahub/data_preview.html",
+                {
+                    "title": f"Données vue {sql_view.slug}",
+                    "object_label": sql_view.slug,
+                    "source_name": "(not deployed)",
+                    "page": 1,
+                    "page_size": 100,
+                    "q": "",
+                    "total": 0,
+                    "columns": [],
+                    "rows": [],
+                    "base_path": reverse("admin:datahub_sqlview_data", args=[sql_view.id]),
+                },
+            )
+
+        page = max(1, int(request.GET.get("page", "1")))
+        page_size = max(1, min(int(request.GET.get("page_size", "100")), 1000))
+        offset = (page - 1) * page_size
+        quoted = connection.ops.quote_name(sql_view.db_relation_name)
+
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT COUNT(*) FROM {quoted}")
+            total = int(cursor.fetchone()[0] or 0)
+            cursor.execute(f"SELECT * FROM {quoted} LIMIT %s OFFSET %s", [page_size, offset])
+            columns = [desc[0] for desc in (cursor.description or [])]
+            rows = cursor.fetchall()
+
+        return render(
+            request,
+            "admin/datahub/data_preview.html",
+            {
+                "title": f"Données vue {sql_view.slug}",
+                "object_label": sql_view.slug,
+                "source_name": sql_view.db_relation_name,
+                "page": page,
+                "page_size": page_size,
+                "q": "",
+                "total": total,
+                "columns": columns,
+                "rows": rows,
+                "base_path": reverse("admin:datahub_sqlview_data", args=[sql_view.id]),
+            },
+        )
 
 @admin.register(ImportRun)
 class ImportRunAdmin(admin.ModelAdmin):

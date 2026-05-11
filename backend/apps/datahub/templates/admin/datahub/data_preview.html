@@ -1,0 +1,50 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p>Source: <code>{{ source_name }}</code> | Objet: <strong>{{ object_label }}</strong></p>
+
+<form method="get" style="margin-bottom: 1rem;">
+  <label for="id_q"><strong>Recherche</strong></label>
+  <input id="id_q" type="text" name="q" value="{{ q }}" placeholder="entity_id / contenu texte" />
+  <label for="id_page_size"><strong>Page size</strong></label>
+  <input id="id_page_size" type="number" min="1" max="1000" name="page_size" value="{{ page_size }}" />
+  <button type="submit" class="button">Appliquer</button>
+</form>
+
+<p>Total lignes: <strong>{{ total }}</strong> | Page: <strong>{{ page }}</strong></p>
+
+{% if rows %}
+  <div style="overflow:auto; max-width: 100%;">
+    <table class="adminlist">
+      <thead>
+        <tr>
+          {% for col in columns %}
+            <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            {% for cell in row %}
+              <td><code>{{ cell }}</code></td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p>Aucune ligne.</p>
+{% endif %}
+
+<p style="margin-top: 1rem;">
+  {% if page > 1 %}
+    <a class="button" href="{{ base_path }}?page={{ page|add:-1 }}&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Précédent</a>
+  {% endif %}
+  {% if rows %}
+    <a class="button" href="{{ base_path }}?page={{ page|add:1 }}&page_size={{ page_size }}{% if q %}&q={{ q|urlencode }}{% endif %}">Suivant</a>
+  {% endif %}
+</p>
+{% endblock %}
+
