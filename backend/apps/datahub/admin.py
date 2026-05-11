@@ -86,7 +86,7 @@ class EntityTableAdmin(admin.ModelAdmin):
                 cursor.execute(
                     """
                     SELECT count(*)
-                    FROM apps_datahub_sqlview
+                    FROM datahub_sqlview
                     WHERE is_active = TRUE AND lower(sql_query) LIKE %s
                     """,
                     [f"%{rel.lower()}%"],

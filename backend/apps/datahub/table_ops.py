@@ -25,6 +25,10 @@ def _q(name: str) -> str:
     return connection.ops.quote_name(name)
 
 
+def _datahub_table(model_name: str) -> str:
+    return f"{Tenant._meta.app_label}_{model_name}"
+
+
 def _validate_identifier(name: str) -> str:
     if not SAFE_IDENT.match(name):
         raise DatahubTableError(f"Invalid SQL identifier: {name}")
@@ -38,7 +42,7 @@ def ensure_entity_table_schema(entity_table: EntityTable) -> None:
             f"""
             CREATE TABLE IF NOT EXISTS {_q(table_name)} (
                 id BIGSERIAL PRIMARY KEY,
-                tenant_id bigint NOT NULL REFERENCES {_q('apps_datahub_tenant')}(id) ON DELETE RESTRICT,
+                tenant_id bigint NOT NULL REFERENCES {_q(_datahub_table('tenant'))}(id) ON DELETE RESTRICT,
                 entity_type varchar(120) NOT NULL,
                 entity_id varchar(255) NOT NULL,
                 search_text text NOT NULL DEFAULT '',
