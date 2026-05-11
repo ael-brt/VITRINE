@@ -6,6 +6,19 @@ class Tenant(models.Model):
     slug = models.SlugField(unique=True, max_length=80)
     name = models.CharField(max_length=150)
     description = models.TextField(blank=True)
+    api_tenant_value = models.CharField(max_length=255, help_text="Tenant value sent in NGSI-LD tenant header.")
+    tenant_header = models.CharField(max_length=100, default="NGSILD-Tenant")
+    auth_url = models.CharField(max_length=500)
+    client_id = models.CharField(max_length=255)
+    base_url = models.CharField(max_length=500, help_text="NGSI-LD base URL ending with /ngsi-ld/v1/")
+    context_link = models.TextField(blank=True)
+    timeout_seconds = models.PositiveIntegerField(default=20)
+    page_limit = models.PositiveIntegerField(default=300)
+    client_secret_env_key = models.CharField(
+        max_length=180,
+        blank=True,
+        help_text="Optional explicit env var name containing tenant secret (example: NGSILD_CLIENT_SECRET__TENANT_X).",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -59,6 +72,14 @@ class EnvironmentAccessGroup(models.Model):
 class EntityTable(models.Model):
     entity_type = models.CharField(max_length=120, unique=True)
     table_name = models.CharField(max_length=120, unique=True)
+    endpoint_path = models.CharField(max_length=120, default="entities")
+    request_limit = models.PositiveIntegerField(default=500)
+    context_link_override = models.TextField(blank=True)
+    extra_query = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Optional additional query string fragment, example: q=speed>50",
+    )
     is_active = models.BooleanField(default=True)
     environments = models.ManyToManyField(Environment, related_name="entity_tables", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

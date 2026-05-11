@@ -48,5 +48,9 @@ Infra health endpoint:
 ## Data Hub ingestion
 - Entity ingestion is now handled by `apps/datahub`.
 - One entity type is mapped to one physical table.
+- API connection settings are configured per tenant and per entity table in Django admin.
+- `client_secret` stays in environment variables (per-tenant key supported):
+  - `NGSILD_CLIENT_SECRET__<TENANT_VALUE_NORMALIZED>`
+  - or explicit env var named in `Tenant.client_secret_env_key`
 - Imports can run in `upsert` or `full` mode from Django admin or command:
   - `python manage.py import_entity_type --entity-type <TYPE> --tenant <TENANT_SLUG> --mode upsert`

@@ -3,6 +3,8 @@ from __future__ import annotations
 from django import forms
 from django.contrib import admin, messages
 from django.db import connection
+from django.urls import reverse
+from django.utils.html import format_html
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -33,8 +35,8 @@ class EntityImportForm(forms.Form):
 
 @admin.register(Tenant)
 class TenantAdmin(admin.ModelAdmin):
-    list_display = ("slug", "name", "is_active", "updated_at")
-    search_fields = ("slug", "name")
+    list_display = ("slug", "name", "api_tenant_value", "is_active", "updated_at")
+    search_fields = ("slug", "name", "api_tenant_value", "client_id")
     list_filter = ("is_active",)
 
 
@@ -54,10 +56,15 @@ class EnvironmentAccessGroupAdmin(admin.ModelAdmin):
 
 @admin.register(EntityTable)
 class EntityTableAdmin(admin.ModelAdmin):
-    list_display = ("entity_type", "table_name", "is_active", "updated_at")
+    list_display = ("entity_type", "table_name", "request_limit", "is_active", "import_link", "updated_at")
     search_fields = ("entity_type", "table_name")
     filter_horizontal = ("environments",)
     actions = ("ensure_schema", "drop_physical_table")
+
+    @admin.display(description="import")
+    def import_link(self, obj: EntityTable):
+        url = reverse("admin:datahub_entity_import", args=[obj.id])
+        return format_html('<a class="button" href="{}">Import</a>', url)
 
     def save_model(self, request, obj, form, change):
         if not obj.table_name:
@@ -126,7 +133,8 @@ class EntityTableAdmin(admin.ModelAdmin):
                 run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
                 try:
                     ensure_entity_table_schema(entity_table)
-                    entities = fetch_entities(entity_type=entity_table.entity_type, limit=limit, overrides={"tenant": tenant.slug})
+                    overrides = _build_fetch_overrides(tenant=tenant, entity_table=entity_table)
+                    entities = fetch_entities(entity_type=entity_table.entity_type, limit=limit, overrides=overrides)
                     written, deleted = upsert_entities(
                         entity_table=entity_table,
                         tenant=tenant,
@@ -149,12 +157,34 @@ class EntityTableAdmin(admin.ModelAdmin):
                     run.save(update_fields=["status", "error_message", "finished_at"])
                     self.message_user(request, f"Import failed: {exc}", level=messages.ERROR)
         else:
-            form = EntityImportForm()
+            form = EntityImportForm(initial={"ngsild_limit": entity_table.request_limit})
         return render(
             request,
             "admin/datahub/import_form.html",
             {"form": form, "entity_table": entity_table, "title": f"Import {entity_table.entity_type}"},
         )
+
+
+def _build_fetch_overrides(*, tenant: Tenant, entity_table: EntityTable) -> dict[str, str]:
+    overrides: dict[str, str] = {
+        "tenant": tenant.api_tenant_value,
+        "tenant_header": tenant.tenant_header,
+        "auth_url": tenant.auth_url,
+        "client_id": tenant.client_id,
+        "base_url": tenant.base_url,
+        "timeout_seconds": str(tenant.timeout_seconds),
+        "page_limit": str(tenant.page_limit),
+        "endpoint_path": entity_table.endpoint_path,
+    }
+    if tenant.context_link:
+        overrides["context_link"] = tenant.context_link
+    if entity_table.context_link_override:
+        overrides["context_link"] = entity_table.context_link_override
+    if tenant.client_secret_env_key:
+        overrides["client_secret_env_key"] = tenant.client_secret_env_key
+    if entity_table.extra_query:
+        overrides["extra_query"] = entity_table.extra_query
+    return overrides
 
 
 @admin.register(SqlView)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
@@ -16,6 +17,30 @@ def _require(name: str) -> str:
     if not value:
         raise DatahubClientError(f"Missing environment variable: {name}")
     return value
+
+
+def _normalize_suffix(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9]", "_", value).upper()
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized
+
+
+def _resolve_client_secret(overrides: dict[str, str]) -> str:
+    explicit_env_key = (overrides.get("client_secret_env_key") or "").strip()
+    if explicit_env_key:
+        scoped = (os.getenv(explicit_env_key, "") or "").strip()
+        if scoped:
+            return scoped
+
+    tenant_value = (overrides.get("tenant") or "").strip()
+    if tenant_value:
+        suffix = _normalize_suffix(tenant_value)
+        scoped_name = f"NGSILD_CLIENT_SECRET__{suffix}"
+        scoped = (os.getenv(scoped_name, "") or "").strip()
+        if scoped:
+            return scoped
+
+    return _require("NGSILD_CLIENT_SECRET")
 
 
 def _json_request(*, method: str, url: str, headers: dict[str, str], body: bytes | None, timeout: int) -> tuple[Any, dict[str, str]]:
@@ -47,15 +72,17 @@ def _oauth_token(*, auth_url: str, client_id: str, client_secret: str, timeout: 
 
 def fetch_entities(entity_type: str, limit: int = 500, overrides: dict[str, str] | None = None) -> list[dict[str, Any]]:
     overrides = overrides or {}
-    timeout = int(os.getenv("NGSILD_TIMEOUT_SECONDS", "20"))
+    timeout = int(overrides.get("timeout_seconds") or os.getenv("NGSILD_TIMEOUT_SECONDS", "20"))
     auth_url = overrides.get("auth_url") or _require("NGSILD_AUTH_URL")
     base_url = (overrides.get("base_url") or _require("NGSILD_BASE_URL")).rstrip("/") + "/"
     client_id = overrides.get("client_id") or _require("NGSILD_CLIENT_ID")
-    client_secret = overrides.get("client_secret") or _require("NGSILD_CLIENT_SECRET")
+    client_secret = overrides.get("client_secret") or _resolve_client_secret(overrides)
     tenant = overrides.get("tenant") or os.getenv("NGSILD_TENANT", "").strip()
     tenant_header = overrides.get("tenant_header") or os.getenv("NGSILD_TENANT_HEADER", "NGSILD-Tenant")
     context_link = overrides.get("context_link") or os.getenv("NGSILD_CONTEXT_LINK", "").strip()
-    page_limit = max(1, min(int(os.getenv("NGSILD_PAGE_LIMIT", "300")), int(limit)))
+    page_limit = max(1, min(int(overrides.get("page_limit") or os.getenv("NGSILD_PAGE_LIMIT", "300")), int(limit)))
+    endpoint_path = (overrides.get("endpoint_path") or "entities").strip().lstrip("/")
+    extra_query = (overrides.get("extra_query") or "").strip()
 
     token = _oauth_token(auth_url=auth_url, client_id=client_id, client_secret=client_secret, timeout=timeout)
     headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
@@ -67,10 +94,13 @@ def fetch_entities(entity_type: str, limit: int = 500, overrides: dict[str, str]
     entities: list[dict[str, Any]] = []
     offset = 0
     while len(entities) < int(limit):
-        params = urlencode({"type": entity_type, "limit": str(page_limit), "offset": str(offset)})
+        base_params = {"type": entity_type, "limit": str(page_limit), "offset": str(offset)}
+        params = urlencode(base_params)
+        if extra_query:
+            params = f"{params}&{extra_query}"
         payload, _ = _json_request(
             method="GET",
-            url=urljoin(base_url, f"entities?{params}"),
+            url=urljoin(base_url, f"{endpoint_path}?{params}"),
             headers=headers,
             body=None,
             timeout=timeout,
@@ -85,4 +115,3 @@ def fetch_entities(entity_type: str, limit: int = 500, overrides: dict[str, str]
             break
         offset += page_limit
     return entities
-

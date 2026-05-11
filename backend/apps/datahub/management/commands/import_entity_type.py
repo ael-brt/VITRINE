@@ -5,6 +5,28 @@ from apps.datahub.models import EntityTable, ImportRun, Tenant
 from apps.datahub.table_ops import ensure_entity_table_schema, upsert_entities
 
 
+def _build_fetch_overrides(*, tenant: Tenant, entity_table: EntityTable) -> dict[str, str]:
+    overrides: dict[str, str] = {
+        "tenant": tenant.api_tenant_value,
+        "tenant_header": tenant.tenant_header,
+        "auth_url": tenant.auth_url,
+        "client_id": tenant.client_id,
+        "base_url": tenant.base_url,
+        "timeout_seconds": str(tenant.timeout_seconds),
+        "page_limit": str(tenant.page_limit),
+        "endpoint_path": entity_table.endpoint_path,
+    }
+    if tenant.context_link:
+        overrides["context_link"] = tenant.context_link
+    if entity_table.context_link_override:
+        overrides["context_link"] = entity_table.context_link_override
+    if tenant.client_secret_env_key:
+        overrides["client_secret_env_key"] = tenant.client_secret_env_key
+    if entity_table.extra_query:
+        overrides["extra_query"] = entity_table.extra_query
+    return overrides
+
+
 class Command(BaseCommand):
     help = "Import one entity type into its dynamic table."
 
@@ -32,7 +54,8 @@ class Command(BaseCommand):
         run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
         try:
             ensure_entity_table_schema(entity_table)
-            entities = fetch_entities(entity_type=entity_type, limit=limit, overrides={"tenant": tenant.slug})
+            overrides = _build_fetch_overrides(tenant=tenant, entity_table=entity_table)
+            entities = fetch_entities(entity_type=entity_type, limit=limit, overrides=overrides)
             written, deleted = upsert_entities(
                 entity_table=entity_table,
                 tenant=tenant,
@@ -51,4 +74,3 @@ class Command(BaseCommand):
             run.error_message = str(exc)
             run.save(update_fields=["status", "error_message"])
             raise CommandError(str(exc)) from exc
-
