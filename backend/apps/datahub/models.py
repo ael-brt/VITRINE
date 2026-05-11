@@ -96,38 +96,6 @@ class SqlView(models.Model):
         return self.slug
 
 
-class DashboardDataset(models.Model):
-    dashboard = models.OneToOneField(
-        "dashboards.Dashboard",
-        on_delete=models.CASCADE,
-        related_name="dataset_binding",
-    )
-    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="dashboard_bindings")
-    entity_table = models.ForeignKey(
-        EntityTable,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="dashboard_bindings",
-    )
-    sql_view = models.ForeignKey(
-        SqlView,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="dashboard_bindings",
-    )
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["dashboard__slug"]
-
-    def __str__(self) -> str:
-        return f"{self.dashboard.slug}:{self.environment.slug}"
-
-
 class ImportRun(models.Model):
     class Mode(models.TextChoices):
         UPSERT = "upsert", "Upsert"
@@ -151,4 +119,3 @@ class ImportRun(models.Model):
 
     class Meta:
         ordering = ["-started_at"]
-

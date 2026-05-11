@@ -8,7 +8,6 @@ class Migration(migrations.Migration):
 
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-        ("dashboards", "0003_backfill_dashboard_tenant"),
     ]
 
     operations = [
@@ -101,19 +100,4 @@ class Migration(migrations.Migration):
             ],
             options={"ordering": ["-started_at"]},
         ),
-        migrations.CreateModel(
-            name="DashboardDataset",
-            fields=[
-                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
-                ("is_active", models.BooleanField(default=True)),
-                ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("updated_at", models.DateTimeField(auto_now=True)),
-                ("dashboard", models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name="dataset_binding", to="dashboards.dashboard")),
-                ("entity_table", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="dashboard_bindings", to="datahub.entitytable")),
-                ("environment", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="dashboard_bindings", to="datahub.environment")),
-                ("sql_view", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name="dashboard_bindings", to="datahub.sqlview")),
-            ],
-            options={"ordering": ["dashboard__slug"]},
-        ),
     ]
-

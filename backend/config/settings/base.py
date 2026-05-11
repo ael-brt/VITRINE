@@ -19,11 +19,7 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "apps.core",
     "apps.accounts",
-    "apps.projects",
-    "apps.dashboards",
-    "apps.geodata",
     "apps.datahub",
-    "apps.ontology",
 ]
 
 MIDDLEWARE = [

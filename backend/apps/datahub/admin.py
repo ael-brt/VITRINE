@@ -8,7 +8,6 @@ from django.utils.text import slugify
 
 from .client import fetch_entities
 from .models import (
-    DashboardDataset,
     EntityTable,
     Environment,
     EnvironmentAccessGroup,
@@ -196,18 +195,9 @@ class SqlViewAdmin(admin.ModelAdmin):
                 self.message_user(request, f"{view.slug}: {exc}", level=messages.ERROR)
         self.message_user(request, f"Refreshed {ok} materialized view(s)")
 
-
-@admin.register(DashboardDataset)
-class DashboardDatasetAdmin(admin.ModelAdmin):
-    list_display = ("dashboard", "environment", "entity_table", "sql_view", "is_active")
-    list_filter = ("environment", "is_active")
-    autocomplete_fields = ("dashboard", "environment", "entity_table", "sql_view")
-
-
 @admin.register(ImportRun)
 class ImportRunAdmin(admin.ModelAdmin):
     list_display = ("entity_table", "tenant", "mode", "status", "rows_read", "rows_written", "rows_deleted", "started_at", "finished_at")
     list_filter = ("mode", "status")
     search_fields = ("entity_table__entity_type", "tenant__slug", "error_message")
     readonly_fields = [field.name for field in ImportRun._meta.fields]
-

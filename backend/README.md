@@ -19,9 +19,7 @@ Full stack bootstrap (from repo root):
 ## Modules
 - `apps/core`: technical endpoints (`/health`)
 - `apps/accounts`: user/account endpoints
-- `apps/projects`: project catalog and media
-- `apps/dashboards`: tenant + dashboard metadata
-- `apps/geodata`: road segment geodata and sync command
+- `apps/datahub`: tenants, environments, entity ingestion, SQL views
 
 ## Run locally
 1. Create virtual env and install dependencies:
@@ -33,8 +31,7 @@ Full stack bootstrap (from repo root):
    - `.env` (and optional `.env.local`) are loaded automatically at startup
 3. Run migrations and server:
    - `python manage.py migrate`
-   - `python manage.py loaddata apps/dashboards/fixtures/initial_dashboards.json`
-   - `python manage.py loaddata apps/projects/fixtures/initial_projects.json`
+   - configure tenants/environments/entity tables in Django admin
    - `python manage.py createsuperuser`
    - `python manage.py runserver`
 
@@ -47,46 +44,6 @@ Infra health endpoint:
 - `POST /api/v1/accounts/login/`
 - `POST /api/v1/accounts/logout/`
 - `GET /api/v1/accounts/me/`
-
-## Dashboard data endpoint (NGSI-LD)
-- `GET /api/v1/dashboards/{slug}/data/`
-- `GET /api/v1/dashboards/{slug}/map/`
-- `GET /api/v1/dashboards/{slug}/kpis/`
-- `GET /api/v1/dashboards/{slug}/timeseries/`
-
-Query params (marts):
-- `map`: `type`, `tenant`, `join_key`, `page`, `page_size`
-- `kpis`: `type`, `tenant`
-- `timeseries`: `type`, `tenant`, `days`
-
-Marts responses are cached using Django cache (Redis when enabled).
-
-All NGSI-LD credentials and provider settings are centralized in `backend/.env.example` under `NGSILD_*`.
-
-## Pilot dashboards
-- `floatingcardata`
-- `ceremap3d`
-
-## Tenant model (collaborative mode)
-- A `Tenant` now structures dashboards (`Tenant -> Dashboards`).
-- No access restriction is applied per user: all authenticated developers can see all tenants/dashboards.
-- Team workflow relies on functional ownership (each dev works on its own tenant/dashboard scope) without hard RBAC limits.
-
-## Multi-tenant per dashboard (Django Admin)
-Use `Dashboard NGSI-LD sources` in admin to configure tenant and source settings per dashboard:
-- target dashboard slug
-- one or multiple entity types (inline `Dashboard NGSI-LD entity types`)
-- `tenant` / `tenant_header`
-- optional overrides (`auth_url`, `base_url`, `client_id`, `context_link`)
-- request and cache tuning (`request_limit`, `cache_ttl_seconds`)
-
-`client_secret` is intentionally not editable in admin. It is resolved from environment variables:
-- default: `NGSILD_CLIENT_SECRET`
-- tenant-specific: `NGSILD_CLIENT_SECRET__<TENANT_NORMALIZED>`
-
-`auth_url` and `client_id` can also be tenant-scoped from environment variables:
-- `NGSILD_AUTH_URL__<TENANT_NORMALIZED>`
-- `NGSILD_CLIENT_ID__<TENANT_NORMALIZED>`
 
 ## Data Hub ingestion
 - Entity ingestion is now handled by `apps/datahub`.
