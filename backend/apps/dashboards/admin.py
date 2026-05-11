@@ -1,13 +1,6 @@
 from django.contrib import admin
 
-from .models import Dashboard, Tenant
-
-
-@admin.register(Tenant)
-class TenantAdmin(admin.ModelAdmin):
-    list_display = ("slug", "name", "is_active")
-    search_fields = ("slug", "name")
-    list_filter = ("is_active",)
+from .models import Dashboard
 
 
 @admin.register(Dashboard)

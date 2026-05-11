@@ -88,28 +88,8 @@ Use `Dashboard NGSI-LD sources` in admin to configure tenant and source settings
 - `NGSILD_AUTH_URL__<TENANT_NORMALIZED>`
 - `NGSILD_CLIENT_ID__<TENANT_NORMALIZED>`
 
-## Sync orchestration (step 3)
-- Source-level scheduling fields are available in `Dashboard NGSI-LD sources`:
-  - `is_sync_enabled`
-  - `sync_mode`
-  - `sync_interval_minutes`
-  - `last_synced_at`
-- Admin actions:
-  - enqueue sync jobs from selected sources
-  - run selected pending sync jobs
-- Management commands:
-  - `python manage.py schedule_ngsild_sync`
-  - `python manage.py run_ngsild_sync_jobs --limit 20`
-- With Celery beat enabled, due jobs are enqueued and pending jobs processed automatically.
-
-## Ingestion v1 (step 4)
-- Normalized storage table: `Dashboard NGSI-LD normalized entities`
-- Upsert strategy:
-  - `incremental`: upsert by (`source`, `entity_type`, `entity_id`)
-  - `full`: replace dataset for each synced `entity_type`
-- Normalized analytical fields:
-  - `dashboard_slug`, `tenant`, `join_key`, `scope`, `ngsi_updated_at`
-  - indexes for (`tenant`, `entity_type`) and (`entity_type`, `join_key`)
-- Manual command:
-  - `python manage.py sync_ngsild_source --dashboard floatingcardata --mode incremental`
-  - `python manage.py sync_ngsild_source --dashboard ceremap3d --mode full`
+## Data Hub ingestion
+- Entity ingestion is now handled by `apps/datahub`.
+- One entity type is mapped to one physical table.
+- Imports can run in `upsert` or `full` mode from Django admin or command:
+  - `python manage.py import_entity_type --entity-type <TYPE> --tenant <TENANT_SLUG> --mode upsert`

@@ -1,6 +1,8 @@
 from django.apps import AppConfig
 
 
-class NgsiLdConfig(AppConfig):
+class DatahubConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "apps.ngsild"
+    name = "apps.datahub"
+    verbose_name = "Data Hub"
+

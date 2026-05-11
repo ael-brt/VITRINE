@@ -1,6 +1,6 @@
 [
   {
-    "model": "dashboards.tenant",
+    "model": "datahub.tenant",
     "pk": 1,
     "fields": {
       "slug": "floatingcardata",
@@ -10,7 +10,7 @@
     }
   },
   {
-    "model": "dashboards.tenant",
+    "model": "datahub.tenant",
     "pk": 2,
     "fields": {
       "slug": "secteurscolaire",
@@ -20,12 +20,42 @@
     }
   },
   {
-    "model": "dashboards.tenant",
+    "model": "datahub.tenant",
     "pk": 3,
     "fields": {
       "slug": "ceremap3d",
       "name": "Tenant ceremap3d",
       "description": "Tenant source pour les dashboards Ceremap3d.",
+      "is_active": true
+    }
+  },
+  {
+    "model": "datahub.environment",
+    "pk": 1,
+    "fields": {
+      "slug": "floatingcardata",
+      "name": "Environnement floatingcardata",
+      "description": "Environnement de visualisation FloatingCarData.",
+      "is_active": true
+    }
+  },
+  {
+    "model": "datahub.environment",
+    "pk": 2,
+    "fields": {
+      "slug": "secteurscolaire",
+      "name": "Environnement secteurscolaire",
+      "description": "Environnement de visualisation secteurs scolaires.",
+      "is_active": true
+    }
+  },
+  {
+    "model": "datahub.environment",
+    "pk": 3,
+    "fields": {
+      "slug": "ceremap3d",
+      "name": "Environnement ceremap3d",
+      "description": "Environnement de visualisation Ceremap3d.",
       "is_active": true
     }
   },
@@ -60,6 +90,39 @@
       "title": "Dashboard ceremap3d",
       "description": "Vue metier 3D pour visualisation des actifs et analyses geospatiales multi-types.",
       "is_protected": true
+    }
+  },
+  {
+    "model": "datahub.dashboarddataset",
+    "pk": 1,
+    "fields": {
+      "dashboard": 1,
+      "environment": 1,
+      "entity_table": null,
+      "sql_view": null,
+      "is_active": true
+    }
+  },
+  {
+    "model": "datahub.dashboarddataset",
+    "pk": 2,
+    "fields": {
+      "dashboard": 2,
+      "environment": 2,
+      "entity_table": null,
+      "sql_view": null,
+      "is_active": true
+    }
+  },
+  {
+    "model": "datahub.dashboarddataset",
+    "pk": 3,
+    "fields": {
+      "dashboard": 3,
+      "environment": 3,
+      "entity_table": null,
+      "sql_view": null,
+      "is_active": true
     }
   }
 ]

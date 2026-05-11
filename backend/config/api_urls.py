@@ -7,4 +7,5 @@ urlpatterns = [
     path("dashboards/", include("apps.dashboards.urls")),
     path("geodata/", include("apps.geodata.urls")),
     path("ontology/", include("apps.ontology.urls")),
+    path("datahub/", include("apps.datahub.urls")),
 ]

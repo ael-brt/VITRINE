@@ -6,6 +6,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.datahub.models import Environment
+from apps.datahub.security import user_environment_ids
+
 
 class LoginView(APIView):
     authentication_classes = []
@@ -79,10 +82,18 @@ class MeView(APIView):
 
     def get(self, request):
         user = request.user
+        env_ids = user_environment_ids(user)
+        environments = list(
+            Environment.objects.filter(id__in=env_ids, is_active=True)
+            .order_by("slug")
+            .values("id", "slug", "name")
+        )
         return Response(
             {
                 "id": user.id,
                 "username": user.username,
                 "email": user.email,
+                "is_admin": bool(user.is_staff or user.is_superuser),
+                "environments": environments,
             }
         )

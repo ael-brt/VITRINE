@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+import json
+import os
+from typing import Any
+from urllib.parse import urlencode, urljoin
+from urllib.request import Request, urlopen
+
+
+class DatahubClientError(RuntimeError):
+    pass
+
+
+def _require(name: str) -> str:
+    value = (os.getenv(name, "") or "").strip()
+    if not value:
+        raise DatahubClientError(f"Missing environment variable: {name}")
+    return value
+
+
+def _json_request(*, method: str, url: str, headers: dict[str, str], body: bytes | None, timeout: int) -> tuple[Any, dict[str, str]]:
+    req = Request(url=url, method=method, headers=headers, data=body)
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+            payload = json.loads(raw) if raw else None
+            return payload, {k.lower(): v for k, v in response.headers.items()}
+    except Exception as exc:
+        raise DatahubClientError(str(exc)) from exc
+
+
+def _oauth_token(*, auth_url: str, client_id: str, client_secret: str, timeout: int) -> str:
+    payload, _headers = _json_request(
+        method="POST",
+        url=auth_url,
+        headers={"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        body=urlencode(
+            {"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret}
+        ).encode("utf-8"),
+        timeout=timeout,
+    )
+    token = payload.get("access_token") if isinstance(payload, dict) else None
+    if not isinstance(token, str) or not token:
+        raise DatahubClientError("Invalid OAuth response.")
+    return token
+
+
+def fetch_entities(entity_type: str, limit: int = 500, overrides: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    overrides = overrides or {}
+    timeout = int(os.getenv("NGSILD_TIMEOUT_SECONDS", "20"))
+    auth_url = overrides.get("auth_url") or _require("NGSILD_AUTH_URL")
+    base_url = (overrides.get("base_url") or _require("NGSILD_BASE_URL")).rstrip("/") + "/"
+    client_id = overrides.get("client_id") or _require("NGSILD_CLIENT_ID")
+    client_secret = overrides.get("client_secret") or _require("NGSILD_CLIENT_SECRET")
+    tenant = overrides.get("tenant") or os.getenv("NGSILD_TENANT", "").strip()
+    tenant_header = overrides.get("tenant_header") or os.getenv("NGSILD_TENANT_HEADER", "NGSILD-Tenant")
+    context_link = overrides.get("context_link") or os.getenv("NGSILD_CONTEXT_LINK", "").strip()
+    page_limit = max(1, min(int(os.getenv("NGSILD_PAGE_LIMIT", "300")), int(limit)))
+
+    token = _oauth_token(auth_url=auth_url, client_id=client_id, client_secret=client_secret, timeout=timeout)
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+    if tenant:
+        headers[tenant_header] = tenant
+    if context_link:
+        headers["Link"] = context_link
+
+    entities: list[dict[str, Any]] = []
+    offset = 0
+    while len(entities) < int(limit):
+        params = urlencode({"type": entity_type, "limit": str(page_limit), "offset": str(offset)})
+        payload, _ = _json_request(
+            method="GET",
+            url=urljoin(base_url, f"entities?{params}"),
+            headers=headers,
+            body=None,
+            timeout=timeout,
+        )
+        rows = payload if isinstance(payload, list) else []
+        typed = [row for row in rows if isinstance(row, dict)]
+        if not typed:
+            break
+        remaining = int(limit) - len(entities)
+        entities.extend(typed[:remaining])
+        if len(typed) < page_limit:
+            break
+        offset += page_limit
+    return entities
+

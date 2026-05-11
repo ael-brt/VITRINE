@@ -1,0 +1,11 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p>Entity type: <strong>{{ entity_table.entity_type }}</strong> | Table: <code>{{ entity_table.table_name }}</code></p>
+<form method="post">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" class="default">Run import</button>
+</form>
+{% endblock %}
+

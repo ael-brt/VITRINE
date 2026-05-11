@@ -10,8 +10,9 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from django.core.cache import cache
+from django.db import connection
 
-from apps.ngsild.models import DashboardNgsiLdNormalizedEntity
+from apps.datahub.models import EntityTable
 
 
 GITHUB_OWNER = "CEREMA"
@@ -364,30 +365,34 @@ def get_ontology_definitions(
     if isinstance(cached, dict):
         return cached
 
-    query = DashboardNgsiLdNormalizedEntity.objects.all().only(
-        "dashboard_slug",
-        "tenant",
-        "entity_type",
-        "entity_payload",
-    )
-    if dashboard_slug:
-        query = query.filter(dashboard_slug=dashboard_slug)
-    if tenant:
-        query = query.filter(tenant=tenant)
-    if entity_type:
-        query = query.filter(entity_type=entity_type)
-
     entity_properties: dict[tuple[str, str], set[str]] = {}
-    for row in query.iterator(chunk_size=500):
-        key = (row.dashboard_slug, row.entity_type)
-        entity_properties.setdefault(key, set())
-        payload = row.entity_payload if isinstance(row.entity_payload, dict) else {}
-        for prop_name in payload.keys():
-            if not isinstance(prop_name, str):
+    tables = EntityTable.objects.filter(is_active=True)
+    if entity_type:
+        tables = tables.filter(entity_type=entity_type)
+    if dashboard_slug:
+        tables = tables.filter(dashboard_bindings__dashboard__slug=dashboard_slug, dashboard_bindings__is_active=True).distinct()
+
+    for table in tables:
+        qtable = connection.ops.quote_name(table.table_name)
+        sql = f"SELECT payload_json FROM {qtable}"
+        params: list[str] = []
+        if tenant:
+            sql += " WHERE tenant_id IN (SELECT id FROM apps_datahub_tenant WHERE slug = %s)"
+            params = [tenant]
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+        for (payload,) in rows:
+            if not isinstance(payload, dict):
                 continue
-            if prop_name.startswith("@") or prop_name in {"id", "type"}:
-                continue
-            entity_properties[key].add(prop_name)
+            key = (dashboard_slug or "global", table.entity_type)
+            entity_properties.setdefault(key, set())
+            for prop_name in payload.keys():
+                if not isinstance(prop_name, str):
+                    continue
+                if prop_name.startswith("@") or prop_name in {"id", "type"}:
+                    continue
+                entity_properties[key].add(prop_name)
 
     # Build a backend-only baseline first (always fast), then enrich with contexts if possible.
     catalog = _load_context_catalog()
