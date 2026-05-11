@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from typing import Any
 
 from django.db import connection, transaction
@@ -152,13 +153,17 @@ def upsert_entities(
             typed_cols = ensure_columns_for_payload(entity_table, entity)
             touched_ids.append(entity_id)
             col_names = ["tenant_id", "entity_type", "entity_id", "search_text", "payload_json"]
-            values: list[Any] = [tenant.id, entity_type, entity_id, _search_text(entity), entity]
+            values: list[Any] = [tenant.id, entity_type, entity_id, _search_text(entity), json.dumps(entity, ensure_ascii=False)]
             for col, val in typed_cols.items():
                 col_names.append(col)
                 values.append(val)
 
             insert_cols_sql = ", ".join(_q(col) for col in col_names)
-            placeholders = ", ".join(["%s"] * len(col_names))
+            # Force jsonb casting for payload_json placeholder to avoid psycopg dict adaptation errors.
+            placeholder_parts = ["%s"] * len(col_names)
+            payload_idx = col_names.index("payload_json")
+            placeholder_parts[payload_idx] = "%s::jsonb"
+            placeholders = ", ".join(placeholder_parts)
             update_cols = ["search_text", "payload_json"] + list(typed_cols.keys())
             update_sql = ", ".join(f"{_q(col)} = EXCLUDED.{_q(col)}" for col in update_cols) + ", updated_at = NOW()"
             typed_values = values
