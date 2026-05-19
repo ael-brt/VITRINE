@@ -55,8 +55,14 @@ class EntityTableSearchView(APIView):
             return Response({"detail": "Access denied."}, status=403)
 
         q = (request.query_params.get("q") or "").strip()
-        page = max(1, int(request.query_params.get("page", "1")))
-        page_size = max(1, min(int(request.query_params.get("page_size", "100")), 1000))
+        try:
+            page = max(1, int(request.query_params.get("page", "1")))
+            page_size = max(1, min(int(request.query_params.get("page_size", "100")), 1000))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "Invalid pagination parameters. Use integers for page and page_size."},
+                status=400,
+            )
         offset = (page - 1) * page_size
         where_sql = ""
         params = []

@@ -1,9 +1,11 @@
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.datahub.models import Environment
@@ -13,6 +15,8 @@ from apps.datahub.security import user_environment_ids
 class LoginView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request):
         identifier = (
@@ -23,8 +27,20 @@ class LoginView(APIView):
         )
         username = str(identifier).strip()
         password = request.data.get("password", "")
+        client_ip = request.META.get("REMOTE_ADDR", "")
+        throttle_key = f"accounts:login:attempts:{client_ip}:{username.lower()}"
+        max_attempts = 8
+        window_seconds = 300
+
+        attempts = int(cache.get(throttle_key, 0) or 0)
+        if attempts >= max_attempts:
+            return Response(
+                {"detail": "Too many login attempts. Try again later."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         if not username or not password:
+            cache.set(throttle_key, attempts + 1, timeout=window_seconds)
             return Response(
                 {"detail": "Email/username and password are required."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -39,6 +55,7 @@ class LoginView(APIView):
                 .first()
             )
             if matched_user is None:
+                cache.set(throttle_key, attempts + 1, timeout=window_seconds)
                 return Response(
                     {"detail": "Invalid credentials."},
                     status=status.HTTP_401_UNAUTHORIZED,
@@ -48,12 +65,15 @@ class LoginView(APIView):
         user = authenticate(request, username=username, password=password)
 
         if user is None:
+            cache.set(throttle_key, attempts + 1, timeout=window_seconds)
             return Response(
                 {"detail": "Invalid credentials."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
+        cache.delete(throttle_key)
 
-        token, _ = Token.objects.get_or_create(user=user)
+        Token.objects.filter(user=user).delete()
+        token = Token.objects.create(user=user)
 
         return Response(
             {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from typing import Any
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
@@ -44,14 +45,22 @@ def _resolve_client_secret(overrides: dict[str, str]) -> str:
 
 
 def _json_request(*, method: str, url: str, headers: dict[str, str], body: bytes | None, timeout: int) -> tuple[Any, dict[str, str]]:
+    max_attempts = max(1, int(os.getenv("NGSILD_HTTP_MAX_ATTEMPTS", "3")))
+    base_sleep = float(os.getenv("NGSILD_HTTP_RETRY_BASE_SECONDS", "0.6"))
     req = Request(url=url, method=method, headers=headers, data=body)
-    try:
-        with urlopen(req, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
-            payload = json.loads(raw) if raw else None
-            return payload, {k.lower(): v for k, v in response.headers.items()}
-    except Exception as exc:
-        raise DatahubClientError(str(exc)) from exc
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with urlopen(req, timeout=timeout) as response:
+                raw = response.read().decode("utf-8")
+                payload = json.loads(raw) if raw else None
+                return payload, {k.lower(): v for k, v in response.headers.items()}
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_attempts:
+                break
+            time.sleep(base_sleep * (2 ** (attempt - 1)))
+    raise DatahubClientError(str(last_exc) if last_exc else "Unknown HTTP error")
 
 
 def _oauth_token(*, auth_url: str, client_id: str, client_secret: str, timeout: int) -> str:

@@ -5,14 +5,13 @@ from django.contrib import admin, messages
 from django.db import connection
 from django.urls import reverse
 from django.utils.html import format_html
-from django.utils import timezone
 from django.utils.text import slugify
 
-from .client import fetch_entities
 from .models import (
     EntityTable,
     Environment,
     EnvironmentAccessGroup,
+    ImportLog,
     ImportRun,
     SqlView,
     Tenant,
@@ -23,13 +22,15 @@ from .table_ops import (
     delete_entity_table_physical,
     ensure_entity_table_schema,
     normalize_table_name,
-    upsert_entities,
 )
+from .tasks import import_entity_table_task
+
+MAX_ADMIN_IMPORT_LIMIT = 300
 
 
 class EntityImportForm(forms.Form):
     mode = forms.ChoiceField(choices=ImportRun.Mode.choices, initial=ImportRun.Mode.UPSERT)
-    ngsild_limit = forms.IntegerField(min_value=1, max_value=5000, initial=500)
+    ngsild_limit = forms.IntegerField(min_value=1, initial=500)
 
 
 @admin.register(Tenant)
@@ -37,6 +38,10 @@ class TenantAdmin(admin.ModelAdmin):
     list_display = ("slug", "name", "api_tenant_value", "is_active", "updated_at")
     search_fields = ("slug", "name", "api_tenant_value", "client_id")
     list_filter = ("is_active",)
+
+    def save_model(self, request, obj, form, change):
+        obj.page_limit = max(1, min(int(obj.page_limit or MAX_ADMIN_IMPORT_LIMIT), MAX_ADMIN_IMPORT_LIMIT))
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(Environment)
@@ -73,6 +78,13 @@ class EntityTableAdmin(admin.ModelAdmin):
         "extra_query",
         "is_active",
     )
+
+    def _has_running_import(self, entity_table: EntityTable) -> bool:
+        return ImportRun.objects.filter(
+            entity_table=entity_table,
+            status=ImportRun.Status.STARTED,
+            finished_at__isnull=True,
+        ).exists()
 
     @admin.display(description="données")
     def data_link(self, obj: EntityTable):
@@ -158,34 +170,22 @@ class EntityTableAdmin(admin.ModelAdmin):
             return redirect("admin:datahub_entitytable_change", table_id)
 
         entity_table = get_object_or_404(EntityTable, id=table_id)
+        if self._has_running_import(entity_table):
+            self.message_user(
+                request,
+                "An import is already running for this entity table.",
+                level=messages.WARNING,
+            )
+            return redirect("admin:datahub_entitytable_change", table_id)
         tenant = entity_table.tenant
         mode = entity_table.import_mode_default
-        limit = max(1, min(int(entity_table.request_limit), 5000))
+        limit = max(1, int(entity_table.request_limit))
         run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
-        try:
-            ensure_entity_table_schema(entity_table)
-            overrides = _build_fetch_overrides(tenant=tenant, entity_table=entity_table)
-            entities = fetch_entities(entity_type=entity_table.entity_type, limit=limit, overrides=overrides)
-            written, deleted = upsert_entities(
-                entity_table=entity_table,
-                tenant=tenant,
-                entity_type=entity_table.entity_type,
-                entities=entities,
-                mode=mode,
-            )
-            run.status = ImportRun.Status.SUCCESS
-            run.rows_read = len(entities)
-            run.rows_written = written
-            run.rows_deleted = deleted
-            run.finished_at = timezone.now()
-            run.save(update_fields=["status", "rows_read", "rows_written", "rows_deleted", "finished_at"])
-            self.message_user(request, f"Import success. read={len(entities)} written={written} deleted={deleted}")
-        except Exception as exc:
-            run.status = ImportRun.Status.FAILED
-            run.error_message = str(exc)
-            run.finished_at = timezone.now()
-            run.save(update_fields=["status", "error_message", "finished_at"])
-            self.message_user(request, f"Import failed: {exc}", level=messages.ERROR)
+        import_entity_table_task.delay(run_id=run.id, limit=limit)
+        self.message_user(
+            request,
+            f"Import queued in background (run #{run.id}). Check Import Runs for status.",
+        )
         return redirect("admin:datahub_entitytable_change", table_id)
 
     def import_view(self, request, table_id: int):
@@ -198,34 +198,22 @@ class EntityTableAdmin(admin.ModelAdmin):
                 mode = form.cleaned_data["mode"]
                 limit = form.cleaned_data["ngsild_limit"]
                 tenant = entity_table.tenant
-                run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
-                try:
-                    ensure_entity_table_schema(entity_table)
-                    overrides = _build_fetch_overrides(tenant=tenant, entity_table=entity_table)
-                    entities = fetch_entities(entity_type=entity_table.entity_type, limit=limit, overrides=overrides)
-                    written, deleted = upsert_entities(
-                        entity_table=entity_table,
-                        tenant=tenant,
-                        entity_type=entity_table.entity_type,
-                        entities=entities,
-                        mode=mode,
+                if self._has_running_import(entity_table):
+                    self.message_user(
+                        request,
+                        "An import is already running for this entity table.",
+                        level=messages.WARNING,
                     )
-                    run.status = ImportRun.Status.SUCCESS
-                    run.rows_read = len(entities)
-                    run.rows_written = written
-                    run.rows_deleted = deleted
-                    run.finished_at = timezone.now()
-                    run.save(update_fields=["status", "rows_read", "rows_written", "rows_deleted", "finished_at"])
-                    self.message_user(request, f"Import success. read={len(entities)} written={written} deleted={deleted}")
-                    return redirect("../../")
-                except Exception as exc:
-                    run.status = ImportRun.Status.FAILED
-                    run.error_message = str(exc)
-                    run.finished_at = timezone.now()
-                    run.save(update_fields=["status", "error_message", "finished_at"])
-                    self.message_user(request, f"Import failed: {exc}", level=messages.ERROR)
+                    return redirect("admin:datahub_entitytable_change", table_id)
+                run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
+                import_entity_table_task.delay(run_id=run.id, limit=limit)
+                self.message_user(
+                    request,
+                    f"Import queued in background (run #{run.id}). Check Import Runs for status.",
+                )
+                return redirect("../../")
         else:
-            form = EntityImportForm(initial={"ngsild_limit": entity_table.request_limit})
+            form = EntityImportForm(initial={"ngsild_limit": max(1, int(entity_table.request_limit))})
         return render(
             request,
             "admin/datahub/import_form.html",
@@ -280,29 +268,6 @@ class EntityTableAdmin(admin.ModelAdmin):
                 "base_path": reverse("admin:datahub_entity_data", args=[entity_table.id]),
             },
         )
-
-
-def _build_fetch_overrides(*, tenant: Tenant, entity_table: EntityTable) -> dict[str, str]:
-    overrides: dict[str, str] = {
-        "tenant": tenant.api_tenant_value,
-        "tenant_header": tenant.tenant_header,
-        "auth_url": tenant.auth_url,
-        "client_id": tenant.client_id,
-        "base_url": tenant.base_url,
-        "timeout_seconds": str(tenant.timeout_seconds),
-        "page_limit": str(tenant.page_limit),
-        "endpoint_path": entity_table.endpoint_path,
-    }
-    if tenant.context_link:
-        overrides["context_link"] = tenant.context_link
-    if entity_table.context_link_override:
-        overrides["context_link"] = entity_table.context_link_override
-    if tenant.client_secret_env_key:
-        overrides["client_secret_env_key"] = tenant.client_secret_env_key
-    if entity_table.extra_query:
-        overrides["extra_query"] = entity_table.extra_query
-    return overrides
-
 
 @admin.register(SqlView)
 class SqlViewAdmin(admin.ModelAdmin):
@@ -436,3 +401,15 @@ class ImportRunAdmin(admin.ModelAdmin):
     list_filter = ("mode", "status")
     search_fields = ("entity_table__entity_type", "tenant__slug", "error_message")
     readonly_fields = [field.name for field in ImportRun._meta.fields]
+
+
+@admin.register(ImportLog)
+class ImportLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "level", "code", "import_run", "short_message")
+    list_filter = ("level", "code", "import_run__mode", "import_run__status")
+    search_fields = ("code", "message", "import_run__entity_table__entity_type", "import_run__tenant__slug")
+    readonly_fields = [field.name for field in ImportLog._meta.fields]
+
+    @admin.display(description="message")
+    def short_message(self, obj: ImportLog):
+        return (obj.message[:120] + "...") if len(obj.message) > 120 else obj.message

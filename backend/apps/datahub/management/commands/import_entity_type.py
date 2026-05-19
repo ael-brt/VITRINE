@@ -1,30 +1,8 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.datahub.client import fetch_entities
+from apps.datahub.import_service import execute_import_run
 from apps.datahub.models import EntityTable, ImportRun, Tenant
-from apps.datahub.table_ops import ensure_entity_table_schema, upsert_entities
-
-
-def _build_fetch_overrides(*, tenant: Tenant, entity_table: EntityTable) -> dict[str, str]:
-    overrides: dict[str, str] = {
-        "tenant": tenant.api_tenant_value,
-        "tenant_header": tenant.tenant_header,
-        "auth_url": tenant.auth_url,
-        "client_id": tenant.client_id,
-        "base_url": tenant.base_url,
-        "timeout_seconds": str(tenant.timeout_seconds),
-        "page_limit": str(tenant.page_limit),
-        "endpoint_path": entity_table.endpoint_path,
-    }
-    if tenant.context_link:
-        overrides["context_link"] = tenant.context_link
-    if entity_table.context_link_override:
-        overrides["context_link"] = entity_table.context_link_override
-    if tenant.client_secret_env_key:
-        overrides["client_secret_env_key"] = tenant.client_secret_env_key
-    if entity_table.extra_query:
-        overrides["extra_query"] = entity_table.extra_query
-    return overrides
+from apps.datahub.tasks import import_entity_table_task
 
 
 class Command(BaseCommand):
@@ -35,12 +13,14 @@ class Command(BaseCommand):
         parser.add_argument("--tenant", required=True, help="Tenant slug")
         parser.add_argument("--mode", choices=[ImportRun.Mode.UPSERT, ImportRun.Mode.FULL], default=ImportRun.Mode.UPSERT)
         parser.add_argument("--limit", type=int, default=500)
+        parser.add_argument("--async", action="store_true", dest="run_async", help="Queue import in Celery background worker.")
 
     def handle(self, *args, **options):
         entity_type = options["entity_type"]
         tenant_slug = options["tenant"]
         mode = options["mode"]
         limit = int(options["limit"])
+        run_async = bool(options["run_async"])
 
         try:
             tenant = Tenant.objects.get(slug=tenant_slug, is_active=True)
@@ -52,25 +32,17 @@ class Command(BaseCommand):
             raise CommandError(f"Unknown active entity type '{entity_type}' for tenant '{tenant_slug}'.") from exc
 
         run = ImportRun.objects.create(entity_table=entity_table, tenant=tenant, mode=mode, status=ImportRun.Status.STARTED)
+        if run_async:
+            import_entity_table_task.delay(run_id=run.id, limit=limit)
+            self.stdout.write(self.style.SUCCESS(f"Queued import run #{run.id} in background worker."))
+            return
+
         try:
-            ensure_entity_table_schema(entity_table)
-            overrides = _build_fetch_overrides(tenant=tenant, entity_table=entity_table)
-            entities = fetch_entities(entity_type=entity_type, limit=limit, overrides=overrides)
-            written, deleted = upsert_entities(
-                entity_table=entity_table,
-                tenant=tenant,
-                entity_type=entity_type,
-                entities=entities,
-                mode=mode,
+            run = execute_import_run(run_id=run.id, limit=limit)
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Imported {run.rows_written} row(s), deleted {run.rows_deleted} row(s)."
+                )
             )
-            run.status = ImportRun.Status.SUCCESS
-            run.rows_read = len(entities)
-            run.rows_written = written
-            run.rows_deleted = deleted
-            run.save(update_fields=["status", "rows_read", "rows_written", "rows_deleted"])
-            self.stdout.write(self.style.SUCCESS(f"Imported {written} row(s), deleted {deleted} row(s)."))
         except Exception as exc:
-            run.status = ImportRun.Status.FAILED
-            run.error_message = str(exc)
-            run.save(update_fields=["status", "error_message"])
             raise CommandError(str(exc)) from exc

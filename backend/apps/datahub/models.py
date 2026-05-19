@@ -147,3 +147,19 @@ class ImportRun(models.Model):
 
     class Meta:
         ordering = ["-started_at"]
+
+
+class ImportLog(models.Model):
+    class Level(models.TextChoices):
+        INFO = "info", "Info"
+        WARNING = "warning", "Warning"
+        ERROR = "error", "Error"
+
+    import_run = models.ForeignKey(ImportRun, on_delete=models.CASCADE, related_name="logs")
+    level = models.CharField(max_length=10, choices=Level.choices, default=Level.INFO)
+    code = models.CharField(max_length=80, blank=True)
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
