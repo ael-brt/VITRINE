@@ -5,11 +5,20 @@ import os
 import re
 import time
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
 
 
 class DatahubClientError(RuntimeError):
+    pass
+
+
+class DatahubRetryableError(DatahubClientError):
+    pass
+
+
+class DatahubClientAuthError(DatahubClientError):
     pass
 
 
@@ -55,11 +64,26 @@ def _json_request(*, method: str, url: str, headers: dict[str, str], body: bytes
                 raw = response.read().decode("utf-8")
                 payload = json.loads(raw) if raw else None
                 return payload, {k.lower(): v for k, v in response.headers.items()}
-        except Exception as exc:
+        except HTTPError as exc:
+            if exc.code == 401:
+                raise DatahubClientAuthError("HTTP Error 401: Unauthorized") from exc
+            # Retry only for transient upstream pressure/failures.
+            retryable_http = {408, 409, 425, 429, 500, 502, 503, 504}
+            last_exc = exc
+            if exc.code not in retryable_http:
+                break
+            if attempt >= max_attempts:
+                break
+            time.sleep(base_sleep * (2 ** (attempt - 1)))
+        except (TimeoutError, URLError) as exc:
             last_exc = exc
             if attempt >= max_attempts:
                 break
             time.sleep(base_sleep * (2 ** (attempt - 1)))
+        except Exception as exc:
+            raise DatahubClientError(str(exc)) from exc
+    if isinstance(last_exc, (HTTPError, URLError, TimeoutError)):
+        raise DatahubRetryableError(str(last_exc))
     raise DatahubClientError(str(last_exc) if last_exc else "Unknown HTTP error")
 
 
