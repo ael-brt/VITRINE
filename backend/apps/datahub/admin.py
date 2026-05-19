@@ -115,7 +115,22 @@ class EntityTableAdmin(admin.ModelAdmin):
 
     @admin.display(description="nb entités")
     def entity_count(self, obj: EntityTable):
+        if self._has_running_import(obj):
+            return "..."
         try:
+            if connection.vendor == "postgresql":
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT COALESCE(reltuples, 0)::bigint
+                        FROM pg_class
+                        WHERE oid = to_regclass(%s)
+                        """,
+                        [obj.table_name],
+                    )
+                    row = cursor.fetchone()
+                    if row and row[0] is not None:
+                        return int(row[0])
             quoted = connection.ops.quote_name(obj.table_name)
             with connection.cursor() as cursor:
                 cursor.execute(f"SELECT COUNT(*) FROM {quoted}")
