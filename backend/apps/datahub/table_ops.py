@@ -15,6 +15,16 @@ class DatahubTableError(RuntimeError):
 
 
 SAFE_IDENT = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+SYSTEM_COLUMNS = {
+    "id",
+    "tenant_id",
+    "entity_type",
+    "entity_id",
+    "search_text",
+    "payload_json",
+    "created_at",
+    "updated_at",
+}
 
 
 def normalize_table_name(entity_type: str) -> str:
@@ -80,6 +90,17 @@ def _simple_value(value: Any) -> tuple[str, Any] | None:
     return None
 
 
+def _relationship_object_value(value: Any) -> tuple[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") != "Relationship":
+        return None
+    obj = value.get("object")
+    if isinstance(obj, str) and obj:
+        return "text", obj
+    return None
+
+
 def _geo_value(value: Any) -> tuple[str, Any] | None:
     if not isinstance(value, dict):
         return None
@@ -98,11 +119,20 @@ def _geo_value(value: Any) -> tuple[str, Any] | None:
 
 
 def _safe_col(name: str) -> str:
-    slug = slugify(name).replace("-", "_")
-    slug = re.sub(r"_+", "_", slug).strip("_")
-    if not slug:
-        slug = "attr"
-    return ("c_" + slug)[:58]
+    cleaned = re.sub(r"[^A-Za-z0-9_]", "_", name or "")
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    if not cleaned:
+        cleaned = "attr"
+    if cleaned[0].isdigit():
+        cleaned = f"attr_{cleaned}"
+    return cleaned[:60]
+
+
+def _dynamic_col_name(base: str) -> str:
+    normalized = base
+    if normalized in SYSTEM_COLUMNS:
+        normalized = f"C_{normalized}"
+    return normalized[:60]
 
 
 def ensure_columns_for_payload(entity_table: EntityTable, entity: dict[str, Any]) -> dict[str, Any]:
@@ -113,7 +143,7 @@ def ensure_columns_for_payload(entity_table: EntityTable, entity: dict[str, Any]
             continue
         parsed = _simple_value(value)
         if parsed:
-            col = _safe_col(key)
+            col = _dynamic_col_name(_safe_col(key))
             mapping[col] = parsed
             continue
 
@@ -121,8 +151,14 @@ def ensure_columns_for_payload(entity_table: EntityTable, entity: dict[str, Any]
         if geo:
             geo_type, geo_json = geo
             base = _safe_col(key)
-            mapping[f"{base}_geo_type"] = ("text", geo_type)
-            mapping[f"{base}_geojson"] = ("jsonb", geo_json)
+            mapping[_dynamic_col_name(f"{base}_geo_type")] = ("text", geo_type)
+            mapping[_dynamic_col_name(f"{base}_geojson")] = ("jsonb", geo_json)
+            continue
+
+        rel = _relationship_object_value(value)
+        if rel:
+            col = _dynamic_col_name(_safe_col(key))
+            mapping[col] = rel
 
     if not mapping:
         return {}
@@ -152,7 +188,10 @@ def _search_text(entity: dict[str, Any]) -> str:
     out = []
     for key, value in entity.items():
         if isinstance(value, dict):
-            value = value.get("value")
+            if value.get("type") == "Relationship":
+                value = value.get("object")
+            else:
+                value = value.get("value")
         if isinstance(value, (str, int, float, bool)):
             out.append(f"{key}:{value}")
     return " | ".join(out)[:30000]
