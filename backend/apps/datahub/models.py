@@ -133,6 +133,7 @@ class ImportRun(models.Model):
         STARTED = "started", "Started"
         SUCCESS = "success", "Success"
         FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
 
     entity_table = models.ForeignKey(EntityTable, on_delete=models.CASCADE, related_name="import_runs")
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="import_runs")
@@ -141,9 +142,11 @@ class ImportRun(models.Model):
     rows_read = models.PositiveIntegerField(default=0)
     rows_written = models.PositiveIntegerField(default=0)
     rows_deleted = models.PositiveIntegerField(default=0)
+    cancel_requested = models.BooleanField(default=False)
     error_message = models.TextField(blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-started_at"]

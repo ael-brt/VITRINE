@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import json
-from typing import Any
+from typing import Any, Callable
 
 from django.db import connection, transaction
 from django.utils.text import slugify
@@ -165,12 +165,15 @@ def upsert_entities(
     entity_type: str,
     entities: list[dict[str, Any]],
     mode: str,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[int, int]:
     table_name = _validate_identifier(entity_table.table_name)
     touched_ids: list[str] = []
     written = 0
     with transaction.atomic():
         for entity in entities:
+            if should_stop and should_stop():
+                raise DatahubTableError("Import cancellation requested.")
             entity_id = entity.get("id")
             if not isinstance(entity_id, str) or not entity_id:
                 continue

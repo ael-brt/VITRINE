@@ -4,7 +4,7 @@ import json
 import os
 import re
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin
 from urllib.request import Request, urlopen
@@ -103,7 +103,12 @@ def _oauth_token(*, auth_url: str, client_id: str, client_secret: str, timeout: 
     return token
 
 
-def fetch_entities(entity_type: str, limit: int = 500, overrides: dict[str, str] | None = None) -> list[dict[str, Any]]:
+def fetch_entities(
+    entity_type: str,
+    limit: int = 500,
+    overrides: dict[str, str] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+) -> list[dict[str, Any]]:
     overrides = overrides or {}
     timeout = int(overrides.get("timeout_seconds") or os.getenv("NGSILD_TIMEOUT_SECONDS", "20"))
     auth_url = overrides.get("auth_url") or _require("NGSILD_AUTH_URL")
@@ -127,6 +132,8 @@ def fetch_entities(entity_type: str, limit: int = 500, overrides: dict[str, str]
     entities: list[dict[str, Any]] = []
     offset = 0
     while len(entities) < int(limit):
+        if should_stop and should_stop():
+            raise DatahubClientError("Import cancellation requested.")
         base_params = {"type": entity_type, "limit": str(page_limit), "offset": str(offset)}
         params = urlencode(base_params)
         if extra_query:

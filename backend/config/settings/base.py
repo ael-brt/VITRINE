@@ -152,8 +152,12 @@ CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_TASK_DEFAULT_QUEUE = os.getenv("CELERY_TASK_DEFAULT_QUEUE", "default")
 CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_SOFT_TIME_LIMIT = int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "6900"))
-CELERY_TASK_TIME_LIMIT = int(os.getenv("CELERY_TASK_TIME_LIMIT", "7200"))
+_celery_soft_limit = int(os.getenv("CELERY_TASK_SOFT_TIME_LIMIT", "0"))
+_celery_hard_limit = int(os.getenv("CELERY_TASK_TIME_LIMIT", "0"))
+if _celery_soft_limit > 0:
+    CELERY_TASK_SOFT_TIME_LIMIT = _celery_soft_limit
+if _celery_hard_limit > 0:
+    CELERY_TASK_TIME_LIMIT = _celery_hard_limit
 
 CELERY_BEAT_SCHEDULE = {}
 

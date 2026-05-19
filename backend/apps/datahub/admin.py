@@ -61,7 +61,7 @@ class EnvironmentAccessGroupAdmin(admin.ModelAdmin):
 @admin.register(EntityTable)
 class EntityTableAdmin(admin.ModelAdmin):
     change_form_template = "admin/datahub/entitytable_change_form.html"
-    list_display = ("tenant", "entity_type", "environment", "table_name", "entity_count", "is_active", "data_link", "updated_at")
+    list_display = ("tenant", "entity_type", "environment", "table_name", "import_widget", "entity_count", "is_active", "data_link", "updated_at")
     search_fields = ("tenant__slug", "entity_type", "table_name", "environment__slug")
     list_filter = ("tenant", "environment", "is_active")
     actions = ("ensure_schema", "drop_physical_table")
@@ -85,6 +85,22 @@ class EntityTableAdmin(admin.ModelAdmin):
             status=ImportRun.Status.STARTED,
             finished_at__isnull=True,
         ).exists()
+
+    @admin.display(description="import")
+    def import_widget(self, obj: EntityTable):
+        run = (
+            ImportRun.objects.filter(entity_table=obj, status=ImportRun.Status.STARTED, finished_at__isnull=True)
+            .order_by("-started_at")
+            .first()
+        )
+        if not run:
+            return format_html('<span style="padding:2px 8px;border-radius:999px;background:#e8f5e9;color:#1b5e20;">Idle</span>')
+        return format_html(
+            '<span style="padding:2px 8px;border-radius:999px;background:#fff8e1;color:#8d6e63;">Running</span> '
+            '<a href="{}">run #{}</a>',
+            reverse("admin:datahub_importrun_change", args=[run.id]),
+            run.id,
+        )
 
     @admin.display(description="données")
     def data_link(self, obj: EntityTable):
@@ -397,10 +413,17 @@ def _project_preview(columns: list[str], rows: list[tuple], *, view_mode: str) -
 
 @admin.register(ImportRun)
 class ImportRunAdmin(admin.ModelAdmin):
-    list_display = ("entity_table", "tenant", "mode", "status", "rows_read", "rows_written", "rows_deleted", "started_at", "finished_at")
+    list_display = ("entity_table", "tenant", "mode", "status", "cancel_requested", "rows_read", "rows_written", "rows_deleted", "started_at", "finished_at")
     list_filter = ("mode", "status")
     search_fields = ("entity_table__entity_type", "tenant__slug", "error_message")
     readonly_fields = [field.name for field in ImportRun._meta.fields]
+    actions = ("request_stop",)
+
+    @admin.action(description="Request stop for selected running imports")
+    def request_stop(self, request, queryset):
+        running = queryset.filter(status=ImportRun.Status.STARTED, finished_at__isnull=True)
+        updated = running.update(cancel_requested=True)
+        self.message_user(request, f"Stop requested for {updated} import run(s).")
 
 
 @admin.register(ImportLog)

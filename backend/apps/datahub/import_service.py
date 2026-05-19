@@ -5,9 +5,9 @@ from contextlib import contextmanager
 from django.core.cache import cache
 from django.utils import timezone
 
-from .client import fetch_entities
+from .client import DatahubClientError, fetch_entities
 from .models import EntityTable, ImportLog, ImportRun, Tenant
-from .table_ops import ensure_entity_table_schema, upsert_entities
+from .table_ops import DatahubTableError, ensure_entity_table_schema, upsert_entities
 
 
 def build_fetch_overrides(*, tenant: Tenant, entity_table: EntityTable) -> dict[str, str]:
@@ -72,10 +72,20 @@ def execute_import_run(*, run_id: int, limit: int) -> ImportRun:
             run.save(update_fields=["status", "error_message", "finished_at"])
             raise RuntimeError(msg)
         _log(run, level=ImportLog.Level.INFO, code="IMPORT_STARTED", message=f"Import started with limit={limit} mode={run.mode}.")
+        def _should_stop() -> bool:
+            return ImportRun.objects.filter(id=run.id, cancel_requested=True).exists()
+
         try:
+            if _should_stop():
+                raise DatahubTableError("Import cancellation requested.")
             ensure_entity_table_schema(entity_table)
             overrides = build_fetch_overrides(tenant=tenant, entity_table=entity_table)
-            entities = fetch_entities(entity_type=entity_table.entity_type, limit=limit, overrides=overrides)
+            entities = fetch_entities(
+                entity_type=entity_table.entity_type,
+                limit=limit,
+                overrides=overrides,
+                should_stop=_should_stop,
+            )
             # Integrity-first guard: a FULL sync cannot safely delete rows if fetch hit the caller cap.
             if run.mode == ImportRun.Mode.FULL and len(entities) >= limit:
                 raise RuntimeError(
@@ -87,6 +97,7 @@ def execute_import_run(*, run_id: int, limit: int) -> ImportRun:
                 entity_type=entity_table.entity_type,
                 entities=entities,
                 mode=run.mode,
+                should_stop=_should_stop,
             )
             run.status = ImportRun.Status.SUCCESS
             run.rows_read = len(entities)
@@ -110,6 +121,21 @@ def execute_import_run(*, run_id: int, limit: int) -> ImportRun:
                 code="IMPORT_SUCCESS",
                 message=f"Import completed. rows_read={run.rows_read} rows_written={run.rows_written} rows_deleted={run.rows_deleted}.",
             )
+        except (DatahubClientError, DatahubTableError) as exc:
+            if "cancellation requested" in str(exc).lower():
+                run.status = ImportRun.Status.CANCELLED
+                run.error_message = str(exc)
+                run.cancelled_at = timezone.now()
+                run.finished_at = run.cancelled_at
+                run.save(update_fields=["status", "error_message", "cancelled_at", "finished_at"])
+                _log(run, level=ImportLog.Level.WARNING, code="IMPORT_CANCELLED", message=str(exc))
+                return run
+            run.status = ImportRun.Status.FAILED
+            run.error_message = str(exc)
+            run.finished_at = timezone.now()
+            run.save(update_fields=["status", "error_message", "finished_at"])
+            _log(run, level=ImportLog.Level.ERROR, code="IMPORT_FAILED", message=str(exc))
+            raise
         except Exception as exc:
             run.status = ImportRun.Status.FAILED
             run.error_message = str(exc)

@@ -14,8 +14,6 @@ from .models import ImportRun
     retry_backoff=True,
     retry_jitter=True,
     retry_kwargs={"max_retries": 5},
-    soft_time_limit=6900,
-    time_limit=7200,
 )
 def import_entity_table_task(self, *, run_id: int, limit: int) -> dict[str, int | str]:
     if not ImportRun.objects.filter(id=run_id).exists():
