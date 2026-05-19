@@ -6,7 +6,7 @@ from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 
-from .models import SqlView
+from .models import EntityTable, SqlView
 
 
 class SqlViewError(RuntimeError):
@@ -37,17 +37,19 @@ def _validate_select_sql(sql: str) -> str:
     )
     if any(token in lower for token in banned):
         raise SqlViewError("Forbidden token in SQL query.")
-    # Parse source relations from FROM/JOIN clauses and restrict to trusted prefixes.
-    allowed_prefixes = ("ent_", "dh_view_")
+    # Parse source relations from FROM/JOIN clauses and restrict to known DB relations.
     relations = re.findall(r"\b(?:from|join)\s+([a-zA-Z0-9_\.\"']+)", normalized, flags=re.IGNORECASE)
+    allowed_relations = set(EntityTable.objects.values_list("table_name", flat=True))
+    allowed_relations.update(SqlView.objects.exclude(db_relation_name="").values_list("db_relation_name", flat=True))
+    allowed_relations = {name for name in allowed_relations if name}
     for relation in relations:
         rel = relation.strip().strip('"').strip("'")
         rel = rel.split(".")[-1].strip('"')
         if rel.lower() in {"select"}:
             continue
-        if not rel.startswith(allowed_prefixes):
+        if rel not in allowed_relations:
             raise SqlViewError(
-                f"Relation '{rel}' is not allowed. Only tables/views starting with ent_ or dh_view_ are allowed."
+                f"Relation '{rel}' is not allowed. Use an existing DataHub table_name or deployed SQL view relation."
             )
     return normalized
 
