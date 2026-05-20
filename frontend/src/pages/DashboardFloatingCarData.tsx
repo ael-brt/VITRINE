@@ -35,15 +35,6 @@ function parseFeatureStartDate(properties: Record<string, unknown>): Date | null
   return null;
 }
 
-function toIsoLocalInput(value: Date): string {
-  const year = value.getUTCFullYear();
-  const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
-  const day = `${value.getUTCDate()}`.padStart(2, "0");
-  const hour = `${value.getUTCHours()}`.padStart(2, "0");
-  const minute = `${value.getUTCMinutes()}`.padStart(2, "0");
-  return `${year}-${month}-${day}T${hour}:${minute}`;
-}
-
 function fromIsoLocalInput(value: string): Date | null {
   if (!value) {
     return null;
