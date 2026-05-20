@@ -52,6 +52,13 @@ function fromIsoLocalInput(value: string): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function toUtcDayKey(value: Date): string {
+  const year = value.getUTCFullYear();
+  const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getUTCDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function DashboardFloatingCarData() {
   const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
@@ -62,7 +69,8 @@ export function DashboardFloatingCarData() {
   const [loading, setLoading] = useState<boolean>(true);
   const [originalData, setOriginalData] = useState<GeoJsonFeatureCollection | null>(null);
   const [preset, setPreset] = useState<DatePreset>("3h");
-  const [selectedDateTimeInput, setSelectedDateTimeInput] = useState<string>("");
+  const [selectedDay, setSelectedDay] = useState<string>("");
+  const [selectedHourStart, setSelectedHourStart] = useState<string>("");
   const [metric, setMetric] = useState<string>("congestionRatio");
   const [dateError, setDateError] = useState<string | null>(null);
 
@@ -99,8 +107,6 @@ export function DashboardFloatingCarData() {
           setTitle(dashboard.title || DEFAULT_TITLE);
           setDescription(dashboard.description || DEFAULT_DESCRIPTION);
           setOriginalData(payload);
-          const now = new Date();
-          setSelectedDateTimeInput(toIsoLocalInput(now));
           setError(null);
         }
       } catch (caughtError) {
@@ -123,21 +129,77 @@ export function DashboardFloatingCarData() {
     };
   }, []);
 
-  const selectedDateTime = useMemo(
-    () => fromIsoLocalInput(selectedDateTimeInput),
-    [selectedDateTimeInput],
-  );
+  const selectedWindowHours = preset === "1h" ? 1 : preset === "2h" ? 2 : 3;
+
+  const availableDayToHours = useMemo(() => {
+    const index = new Map<string, Set<string>>();
+    if (!originalData) {
+      return index;
+    }
+    for (const feature of originalData.features) {
+      const props = (feature.properties || {}) as Record<string, unknown>;
+      const startDate = parseFeatureStartDate(props);
+      if (!startDate) {
+        continue;
+      }
+      const wh = props.windowHours;
+      const currentWindowHours = typeof wh === "number" ? wh : Number(wh);
+      if (!Number.isFinite(currentWindowHours) || currentWindowHours !== selectedWindowHours) {
+        continue;
+      }
+      const day = toUtcDayKey(startDate);
+      const hour = `${startDate.getUTCHours()}`.padStart(2, "0");
+      if (!index.has(day)) {
+        index.set(day, new Set<string>());
+      }
+      index.get(day)?.add(hour);
+    }
+    return index;
+  }, [originalData, selectedWindowHours]);
+
+  const availableDays = useMemo(() => Array.from(availableDayToHours.keys()).sort(), [availableDayToHours]);
+  const availableHours = useMemo(() => {
+    const set = availableDayToHours.get(selectedDay);
+    return set ? Array.from(set).sort((a, b) => Number(a) - Number(b)) : [];
+  }, [availableDayToHours, selectedDay]);
+
+  useEffect(() => {
+    if (availableDays.length === 0) {
+      setSelectedDay("");
+      return;
+    }
+    if (!selectedDay || !availableDays.includes(selectedDay)) {
+      setSelectedDay(availableDays[0]);
+    }
+  }, [availableDays, selectedDay]);
+
+  useEffect(() => {
+    if (availableHours.length === 0) {
+      setSelectedHourStart("");
+      return;
+    }
+    if (!selectedHourStart || !availableHours.includes(selectedHourStart)) {
+      setSelectedHourStart(availableHours[0]);
+    }
+  }, [availableHours, selectedHourStart]);
+
+  const selectedDateTime = useMemo(() => {
+    if (!selectedDay || !selectedHourStart) {
+      return null;
+    }
+    return fromIsoLocalInput(`${selectedDay}T${selectedHourStart}:00`);
+  }, [selectedDay, selectedHourStart]);
 
   const filteredFeatures = useMemo(() => {
     if (!originalData) {
       return [];
     }
     if (!selectedDateTime) {
-      setDateError("Selectionne une date et une heure.");
+      setDateError("Selectionne un jour et une heure disponibles.");
       return [];
     }
     setDateError(null);
-    const selectedHourWindow = preset === "1h" ? 1 : preset === "2h" ? 2 : 3;
+    const selectedHourWindow = selectedWindowHours;
     return originalData.features.filter((feature) => {
       const props = (feature.properties || {}) as Record<string, unknown>;
       const startDate = parseFeatureStartDate(props);
@@ -158,7 +220,7 @@ export function DashboardFloatingCarData() {
       }
       return true;
     });
-  }, [originalData, selectedDateTime, preset]);
+  }, [originalData, selectedDateTime, preset, selectedWindowHours]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -197,7 +259,7 @@ export function DashboardFloatingCarData() {
   const totalFeatures = originalData?.features.length ?? 0;
   const keptFeatures = filteredFeatures.length;
   const keptPct = totalFeatures > 0 ? (keptFeatures / totalFeatures) * 100 : 0;
-  const activePeriod = `Periode ${preset} a la date ${selectedDateTimeInput || "-"} (UTC)`;
+  const activePeriod = `Periode ${preset}, jour ${selectedDay || "-"}, debut ${selectedHourStart || "--"}:00 UTC`;
 
   return (
     <div className={`container ${styles.page}`}>
@@ -223,13 +285,28 @@ export function DashboardFloatingCarData() {
         </div>
         <div className={styles.filterRow}>
           <label className={styles.filterLabel}>
-            Date et heure (UTC)
-            <input
+            Jour disponible (UTC)
+            <select className={styles.searchInput} value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)}>
+              {availableDays.map((day) => (
+                <option key={day} value={day}>
+                  {day}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.filterLabel}>
+            Heure de debut disponible (UTC)
+            <select
               className={styles.searchInput}
-              type="datetime-local"
-              value={selectedDateTimeInput}
-              onChange={(e) => setSelectedDateTimeInput(e.target.value)}
-            />
+              value={selectedHourStart}
+              onChange={(e) => setSelectedHourStart(e.target.value)}
+            >
+              {availableHours.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hour}:00
+                </option>
+              ))}
+            </select>
           </label>
           <label className={styles.filterLabel}>
             Metrique couleur
