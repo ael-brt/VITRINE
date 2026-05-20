@@ -68,34 +68,12 @@
 
 .map {
   height: 460px;
-  background:
-    radial-gradient(circle at 10% 10%, rgba(239, 125, 0, 0.2), transparent 32%),
-    radial-gradient(circle at 88% 80%, rgba(47, 143, 106, 0.22), transparent 35%),
-    linear-gradient(165deg, #f8fafc 0%, #eef3f8 100%);
-  display: grid;
-  place-items: center;
+  background: #dfe8ef;
   position: relative;
 }
 
 .map::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(31, 42, 51, 0.08) 0,
-      rgba(31, 42, 51, 0.08) 1px,
-      transparent 1px,
-      transparent 60px
-    ),
-    repeating-linear-gradient(
-      0deg,
-      rgba(31, 42, 51, 0.08) 0,
-      rgba(31, 42, 51, 0.08) 1px,
-      transparent 1px,
-      transparent 60px
-    );
+  content: none;
 }
 
 .mapLabel {
@@ -196,6 +174,7 @@
 .filterRow {
   display: grid;
   gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .filterLabel {
