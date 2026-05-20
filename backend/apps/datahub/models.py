@@ -124,6 +124,24 @@ class SqlView(models.Model):
         return self.slug
 
 
+class Dashboard(models.Model):
+    slug = models.SlugField(unique=True, max_length=120)
+    title = models.CharField(max_length=180)
+    description = models.TextField(blank=True)
+    is_protected = models.BooleanField(default=True)
+    sql_view = models.ForeignKey(SqlView, on_delete=models.SET_NULL, null=True, blank=True, related_name="dashboards")
+    environments = models.ManyToManyField(Environment, related_name="dashboards", blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["slug"]
+
+    def __str__(self) -> str:
+        return self.slug
+
+
 class ImportRun(models.Model):
     class Mode(models.TextChoices):
         UPSERT = "upsert", "Upsert"

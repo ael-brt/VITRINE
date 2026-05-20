@@ -8,6 +8,7 @@ from django.utils.html import format_html
 from django.utils.text import slugify
 
 from .models import (
+    Dashboard,
     EntityTable,
     Environment,
     EnvironmentAccessGroup,
@@ -56,6 +57,14 @@ class EnvironmentAccessGroupAdmin(admin.ModelAdmin):
     list_display = ("name", "is_active", "updated_at")
     search_fields = ("name",)
     filter_horizontal = ("users", "environments")
+
+
+@admin.register(Dashboard)
+class DashboardAdmin(admin.ModelAdmin):
+    list_display = ("slug", "title", "is_active", "is_protected", "sql_view", "updated_at")
+    search_fields = ("slug", "title", "description")
+    list_filter = ("is_active", "is_protected")
+    filter_horizontal = ("environments",)
 
 
 @admin.register(EntityTable)

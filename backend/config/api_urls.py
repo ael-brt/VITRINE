@@ -4,4 +4,5 @@ urlpatterns = [
     path("core/", include("apps.core.urls")),
     path("accounts/", include("apps.accounts.urls")),
     path("datahub/", include("apps.datahub.urls")),
+    path("dashboards/", include("apps.datahub.dashboard_urls")),
 ]
