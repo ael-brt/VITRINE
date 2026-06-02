@@ -741,7 +741,7 @@ export function DashboardFloatingCarData() {
 
         <div className={styles.filterRowMetric}>
           <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Metrique couleur</span>
+            <span className={styles.filterLabel}>Metrique</span>
             <select
               className={styles.searchInput}
               value={metric}
@@ -753,7 +753,7 @@ export function DashboardFloatingCarData() {
               ) : (
                 metricOptions.map((option) => (
                   <option key={option.key} value={option.key}>
-                    {option.label} ({option.count})
+                    {option.label}
                   </option>
                 ))
               )}
@@ -779,7 +779,7 @@ export function DashboardFloatingCarData() {
         </article>
         <article className={styles.stat}>
           <span className={styles.statValue}>{selectedMetricLabel}</span>
-          <div className={styles.statLabel}>mesure couleur</div>
+          <div className={styles.statLabel}>mesure</div>
         </article>
         <article className={styles.stat}>
           <span className={styles.statValue}>{metricSummary ? formatNumber(metricSummary.avg, metric) : "N/A"}</span>
@@ -794,18 +794,34 @@ export function DashboardFloatingCarData() {
       <div className={styles.surface}>
         <div className={styles.mapWrap}>
           <div id="floating-map" className={styles.map} />
-          <div className={styles.mapBadge}>
-            <span className={styles.mapBadgeLabel}>Couleur</span>
-            <strong>{selectedMetricLabel}</strong>
-            <span className={styles.mapBadgeMeta}>
-              {metricSummary
-                ? `${formatNumber(metricSummary.min, metric)} - ${formatNumber(metricSummary.max, metric)}`
-                : "aucune valeur numerique"}
-            </span>
-          </div>
-          <div className={styles.mapBadgeSecondary}>
-            <span className={styles.mapBadgeLabel}>Largeur</span>
-            <strong>Nombre de mesures sur le troncon</strong>
+          <div className={styles.floatingLegend}>
+            <div className={styles.floatingLegendItem}>
+              <span className={styles.floatingLegendSwatchColor} />
+              <div className={styles.floatingLegendContent}>
+                <span className={styles.floatingLegendLabel}>Metrique</span>
+                <strong>{selectedMetricLabel}</strong>
+              </div>
+            </div>
+            <div className={styles.floatingLegendItem}>
+              <span className={styles.floatingLegendSwatchWidth} />
+              <div className={styles.floatingLegendContent}>
+                <span className={styles.floatingLegendLabel}>Largeur</span>
+                <strong>Nombre de mesures sur le troncon</strong>
+              </div>
+            </div>
+            <div className={styles.floatingLegendItem}>
+              <span className={styles.floatingLegendSwatchRange} />
+              <div className={styles.floatingLegendContent}>
+                <span className={styles.floatingLegendLabel}>Plage</span>
+                <strong>
+                  {loading
+                    ? "Chargement..."
+                    : metricSummary
+                      ? `${formatNumber(metricSummary.min, metric)} - ${formatNumber(metricSummary.max, metric)}`
+                      : "Aucune valeur numerique"}
+                </strong>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -818,9 +834,15 @@ export function DashboardFloatingCarData() {
           </div>
           <div className={styles.detailMetricBox}>
             <span className={styles.detailMetricLabel}>{selectedMetricLabel}</span>
-            <strong className={styles.detailMetricValue}>
-              {selectedMetricValue !== null ? formatNumber(selectedMetricValue, metric) : "N/A"}
-            </strong>
+            {loading ? (
+              <span className={styles.loadingWidget} aria-label="Chargement des donnees" role="status">
+                <span className={styles.loadingSpinner} />
+              </span>
+            ) : (
+              <strong className={styles.detailMetricValue}>
+                {selectedMetricValue !== null ? formatNumber(selectedMetricValue, metric) : "N/A"}
+              </strong>
+            )}
           </div>
         </div>
 
