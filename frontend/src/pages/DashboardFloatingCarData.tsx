@@ -766,27 +766,75 @@ export function DashboardFloatingCarData() {
 
       <div className={styles.stats}>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{totalFeatures}</span>
+          <span className={styles.statValue}>
+            {loading ? (
+              <span className={styles.loadingWidget} aria-label="Chargement des donnees" role="status">
+                <span className={styles.loadingSpinner} />
+              </span>
+            ) : (
+              totalFeatures
+            )}
+          </span>
           <div className={styles.statLabel}>features totales</div>
         </article>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{keptFeatures}</span>
+          <span className={styles.statValue}>
+            {loading ? (
+              <span className={styles.loadingWidget} aria-label="Chargement des donnees" role="status">
+                <span className={styles.loadingSpinner} />
+              </span>
+            ) : (
+              keptFeatures
+            )}
+          </span>
           <div className={styles.statLabel}>features apres filtre date</div>
         </article>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{keptPct.toFixed(1)}%</span>
+          <span className={styles.statValue}>
+            {loading ? (
+              <span className={styles.loadingWidget} aria-label="Chargement des donnees" role="status">
+                <span className={styles.loadingSpinner} />
+              </span>
+            ) : (
+              `${keptPct.toFixed(1)}%`
+            )}
+          </span>
           <div className={styles.statLabel}>pourcentage conserve</div>
         </article>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{selectedMetricLabel}</span>
+          <span className={styles.statValue}>
+            {loading ? (
+              <span className={styles.loadingWidget} aria-label="Chargement des donnees" role="status">
+                <span className={styles.loadingSpinner} />
+              </span>
+            ) : (
+              selectedMetricLabel
+            )}
+          </span>
           <div className={styles.statLabel}>mesure</div>
         </article>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{metricSummary ? formatNumber(metricSummary.avg, metric) : "N/A"}</span>
+          <span className={styles.statValue}>
+            {loading ? (
+              <span className={styles.loadingWidget} aria-label="Chargement des donnees" role="status">
+                <span className={styles.loadingSpinner} />
+              </span>
+            ) : (
+              metricSummary ? formatNumber(metricSummary.avg, metric) : "N/A"
+            )}
+          </span>
           <div className={styles.statLabel}>valeur moyenne</div>
         </article>
         <article className={styles.stat}>
-          <span className={styles.statValue}>{activePeriod}</span>
+          <span className={styles.statValue}>
+            {loading ? (
+              <span className={styles.loadingWidget} aria-label="Chargement des donnees" role="status">
+                <span className={styles.loadingSpinner} />
+              </span>
+            ) : (
+              activePeriod
+            )}
+          </span>
           <div className={styles.statLabel}>periode active</div>
         </article>
       </div>
