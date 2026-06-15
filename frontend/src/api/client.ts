@@ -335,3 +335,40 @@ export async function fetchDashboardJoinKpis(
   const payload = await fetchJson<ApiDashboardJoinedData>(`/dashboards/${slug}/joined/${query}`);
   return toDashboardJoinKpisData(payload);
 }
+
+export async function fetchSqlViewGeoJson<T = GeoJSON.FeatureCollection>(slug: string): Promise<T> {
+  return fetchJson<T>(`/datahub/sqlviews/${slug}/geojson/`);
+}
+
+export async function fetchSqlViewRows<T = Record<string, unknown>>(
+  slug: string,
+  params: { page?: number; pageSize?: number } = {},
+): Promise<{
+  slug: string;
+  relation: string;
+  page: number;
+  pageSize: number;
+  totalRows: number;
+  items: T[];
+}> {
+  const query = buildQuery({
+    page: params.page,
+    page_size: params.pageSize,
+  });
+  const payload = await fetchJson<{
+    slug: string;
+    relation: string;
+    page: number;
+    page_size: number;
+    total_rows: number;
+    items: T[];
+  }>(`/datahub/sqlviews/${slug}/rows/${query}`);
+  return {
+    slug: payload.slug,
+    relation: payload.relation,
+    page: payload.page,
+    pageSize: payload.page_size,
+    totalRows: payload.total_rows,
+    items: payload.items ?? [],
+  };
+}
