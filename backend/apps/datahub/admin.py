@@ -17,7 +17,7 @@ from .models import (
     SqlView,
     Tenant,
 )
-from .sql_views import SqlViewError, deploy_sql_view, refresh_materialized_view
+from .sql_views import SqlViewError, deploy_sql_view, drop_sql_view_relation, refresh_materialized_view
 from .table_ops import (
     DatahubTableError,
     delete_entity_table_physical,
@@ -338,6 +338,36 @@ class SqlViewAdmin(admin.ModelAdmin):
             deploy_sql_view(obj)
         except SqlViewError as exc:
             self.message_user(request, str(exc), level=messages.ERROR)
+
+    def delete_model(self, request, obj):
+        try:
+            drop_sql_view_relation(obj)
+        except Exception as exc:
+            self.message_user(
+                request,
+                f"{obj.slug}: SQL relation deletion blocked: {exc}",
+                level=messages.ERROR,
+            )
+            return
+        super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        deleted = 0
+        blocked = 0
+        for view in queryset:
+            try:
+                drop_sql_view_relation(view)
+            except Exception as exc:
+                blocked += 1
+                self.message_user(
+                    request,
+                    f"{view.slug}: SQL relation deletion blocked: {exc}",
+                    level=messages.ERROR,
+                )
+                continue
+            view.delete()
+            deleted += 1
+        self.message_user(request, f"Deleted SQL views={deleted}, Blocked={blocked}")
 
     @admin.action(description="Deploy selected SQL views")
     def deploy_selected(self, request, queryset):

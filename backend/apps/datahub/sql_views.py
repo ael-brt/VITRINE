@@ -58,6 +58,20 @@ def _relation_name(view: SqlView) -> str:
     return (view.db_relation_name or f"dh_view_{view.slug.replace('-', '_')}")[:150]
 
 
+def _drop_relation_if_exists(cursor, relation: str) -> None:
+    qrel = connection.ops.quote_name(relation)
+    if connection.vendor == "postgresql":
+        cursor.execute("SELECT relkind FROM pg_class WHERE oid = to_regclass(%s)", [relation])
+        row = cursor.fetchone()
+        relkind = row[0] if row else None
+        if relkind == "m":
+            cursor.execute(f"DROP MATERIALIZED VIEW {qrel}")
+        elif relkind == "v":
+            cursor.execute(f"DROP VIEW {qrel}")
+        return
+    cursor.execute(f"DROP VIEW IF EXISTS {qrel}")
+
+
 def deploy_sql_view(view: SqlView) -> str:
     query = _validate_select_sql(view.sql_query)
     relation = _relation_name(view)
@@ -65,8 +79,7 @@ def deploy_sql_view(view: SqlView) -> str:
     statement_timeout_ms = int(getattr(settings, "DATAHUB_SQL_VIEW_STATEMENT_TIMEOUT_MS", 5000))
     with connection.cursor() as cursor:
         cursor.execute("SET LOCAL statement_timeout = %s", [statement_timeout_ms])
-        cursor.execute(f"DROP MATERIALIZED VIEW IF EXISTS {qrel}")
-        cursor.execute(f"DROP VIEW IF EXISTS {qrel}")
+        _drop_relation_if_exists(cursor, relation)
         if view.storage_mode == SqlView.StorageMode.MATERIALIZED_VIEW:
             cursor.execute(f"CREATE MATERIALIZED VIEW {qrel} AS {query}")
         else:
@@ -76,6 +89,16 @@ def deploy_sql_view(view: SqlView) -> str:
     view.last_refresh_error = ""
     view.save(update_fields=["db_relation_name", "last_refresh_status", "last_refresh_error"])
     return relation
+
+
+def drop_sql_view_relation(view: SqlView) -> None:
+    relation = view.db_relation_name
+    if not relation:
+        return
+    statement_timeout_ms = int(getattr(settings, "DATAHUB_SQL_VIEW_STATEMENT_TIMEOUT_MS", 5000))
+    with connection.cursor() as cursor:
+        cursor.execute("SET LOCAL statement_timeout = %s", [statement_timeout_ms])
+        _drop_relation_if_exists(cursor, relation)
 
 
 def refresh_materialized_view(view: SqlView) -> None:
