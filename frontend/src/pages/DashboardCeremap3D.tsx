@@ -57,14 +57,21 @@ type CeremapRecord = {
   entityId: string;
   scope: string;
   category: string;
+  catireveCategory: string;
   typePanneauCode: string;
   typePanneauLabel: string;
+  gammePanneau: string;
+  positionPanneau: string;
+  ploDebut: string;
+  arreteNecessaire: string;
   typePanneauActuel: string;
   typePanneauParDecision: string;
   typeEmprise: string;
   route: string;
   cote: string;
   couloir: string;
+  pdfFilename: string;
+  panonceaux: string;
   largeur: number | null;
   hauteur: number | null;
   firstImagePath: string | null;
@@ -73,6 +80,7 @@ type CeremapRecord = {
   absPrNegD: string;
   absPrPosD: string;
   hasDecision: boolean;
+  hasDecisionLabel: string;
   hasPresignalisation: boolean;
   pointGeometry: GeoJSON.Point | null;
   vitesseGeometry: GeoJSON.Geometry | null;
@@ -300,15 +308,31 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     feature.geometry?.type ||
     "Inconnu";
   const category = getStringValue(findPropertyValue(properties, ["categorie"])) || "N/A";
+  const catireveCategory =
+    getStringValue(findPropertyValue(properties, ["type_panneau_catireve"])) ||
+    category;
   const typePanneauCode =
     getStringValue(findPropertyValue(properties, ["type_type_panneau", "typePanneau"])) || "N/A";
   const typePanneauLabel =
     getStringValue(findPropertyValue(properties, ["description_type_panneau"])) || "N/A";
+  const gammePanneau =
+    getStringValue(findPropertyValue(properties, ["apourgamme_gamme", "aPourGamme_gamme"])) || "N/A";
+  const positionPanneau =
+    getStringValue(findPropertyValue(properties, ["apourgeocodage_couloir", "couloir"])) || "N/A";
+  const ploDebut =
+    getStringValue(findPropertyValue(properties, ["nomplodeb", "nomPloDeb"])) || "N/A";
+  const arreteNecessaire =
+    getStringValue(findPropertyValue(properties, ["apourtype_pardecision", "type_panneau_pardecision"])) || "N/A";
   const pointTitle =
     getStringValue(findPropertyValue(properties, ["description_type_panneau"])) ||
     typePanneauCode ||
     entityId;
   const firstImagePath = getStringValue(findPropertyValue(properties, ["first_image_path"]));
+  const pdfFilename =
+    getStringValue(findPropertyValue(properties, ["pdf_filename"])) || "N/A";
+  const panonceaux =
+    getStringValue(findPropertyValue(properties, ["panonceaux"])) || "N/A";
+  const hasDecision = toBooleanValue(findPropertyValue(properties, ["pardecision_et_apourdecision"]));
   const isPlo = /plo|bornepostale|borne postale/i.test(
     [
       entityType,
@@ -328,14 +352,21 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     entityId,
     scope: getStringValue(findPropertyValue(properties, ["scope"])) || "N/A",
     category,
+    catireveCategory,
     typePanneauCode,
     typePanneauLabel,
+    gammePanneau,
+    positionPanneau,
+    ploDebut,
+    arreteNecessaire,
     typePanneauActuel: getStringValue(findPropertyValue(properties, ["type_panneau_actuel"])) || "N/A",
     typePanneauParDecision: getStringValue(findPropertyValue(properties, ["type_panneau_pardecision"])) || "N/A",
     typeEmprise: getStringValue(findPropertyValue(properties, ["type_emprise"])) || "N/A",
     route: getStringValue(findPropertyValue(properties, ["route"])) || "N/A",
     cote: getStringValue(findPropertyValue(properties, ["cote"])) || "N/A",
     couloir: getStringValue(findPropertyValue(properties, ["couloir"])) || "N/A",
+    pdfFilename,
+    panonceaux,
     largeur: toNumberValue(findPropertyValue(properties, ["largeur"])),
     hauteur: toNumberValue(findPropertyValue(properties, ["hauteur"])),
     firstImagePath,
@@ -343,7 +374,8 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     vehicleType: getStringValue(findPropertyValue(properties, ["type_vehicule_emprise"])) || "N/A",
     absPrNegD: getStringValue(findPropertyValue(properties, ["absPrNegD"])) || "N/A",
     absPrPosD: getStringValue(findPropertyValue(properties, ["absPrPosD"])) || "N/A",
-    hasDecision: toBooleanValue(findPropertyValue(properties, ["pardecision_et_apourdecision"])),
+    hasDecision,
+    hasDecisionLabel: hasDecision ? "Oui" : "Non",
     hasPresignalisation: toBooleanValue(findPropertyValue(properties, ["aPourPresignalisation"])),
     pointGeometry,
     vitesseGeometry: parseGeoJsonGeometry(findPropertyValue(properties, ["localisation_geojson_vitesse"])),
@@ -356,30 +388,6 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     siteDisplayLabel: getSiteDisplayLabel(pointGeometry),
     isPlo,
   };
-}
-
-function recordMatchesSearch(record: CeremapRecord, searchValue: string): boolean {
-  const normalizedSearch = searchValue.trim().toLowerCase();
-  if (!normalizedSearch) {
-    return true;
-  }
-  const values = Object.values(record.rawProperties)
-    .map((value) => getStringValue(value) || "")
-    .join(" ");
-  return [
-    record.entityId,
-    record.entityType,
-    record.category,
-    record.typePanneauCode,
-    record.typePanneauLabel,
-    record.route,
-    record.scope,
-    record.tenantId,
-    values,
-  ]
-    .join(" ")
-    .toLowerCase()
-    .includes(normalizedSearch);
 }
 
 function buildOffsetLatLng(baseLatLng: L.LatLng, index: number, total: number): L.LatLng {
@@ -455,6 +463,16 @@ function createMeasureLabel(index: number): string {
   return index === 0 ? "A" : index === 1 ? "B" : String(index + 1);
 }
 
+function getFilterOptions(records: CeremapRecord[], pick: (record: CeremapRecord) => string): string[] {
+  return Array.from(
+    new Set(
+      records
+        .map(pick)
+        .filter((value) => value && value !== "N/A"),
+    ),
+  ).sort((left, right) => left.localeCompare(right, "fr"));
+}
+
 function getNearestSnapPoint(map: L.Map, clickLatLng: L.LatLng, records: CeremapRecord[], pointOffsets: Map<string, L.LatLng>): L.LatLng {
   const clickPoint = map.latLngToContainerPoint(clickLatLng);
   let best: { latlng: L.LatLng; distance: number } | null = null;
@@ -510,12 +528,19 @@ export function DashboardCeremap3D() {
   const [error, setError] = useState<string | null>(null);
   const [allFeatures, setAllFeatures] = useState<DashboardFeature[]>(EMPTY_FEATURES);
   const [selectedRecordKey, setSelectedRecordKey] = useState("");
-  const [selectedTenant, setSelectedTenant] = useState("all");
-  const [selectedScope, setSelectedScope] = useState("all");
-  const [selectedCategory, setSelectedCategory] = useState("all");
-  const [selectedTypeCode, setSelectedTypeCode] = useState("all");
+  const [selectedCatireveCategory, setSelectedCatireveCategory] = useState("all");
+  const [selectedTypePanneau, setSelectedTypePanneau] = useState("all");
+  const [selectedGammePanneau, setSelectedGammePanneau] = useState("all");
+  const [selectedPositionPanneau, setSelectedPositionPanneau] = useState("all");
   const [selectedRoute, setSelectedRoute] = useState("all");
-  const [searchValue, setSearchValue] = useState("");
+  const [selectedCote, setSelectedCote] = useState("all");
+  const [selectedPloDebut, setSelectedPloDebut] = useState("all");
+  const [selectedArreteNecessaire, setSelectedArreteNecessaire] = useState("all");
+  const [selectedTypeEmprise, setSelectedTypeEmprise] = useState("all");
+  const [selectedPdfFilename, setSelectedPdfFilename] = useState("all");
+  const [selectedPanonceaux, setSelectedPanonceaux] = useState("all");
+  const [selectedVehicleType, setSelectedVehicleType] = useState("all");
+  const [selectedDecisionAttachment, setSelectedDecisionAttachment] = useState("all");
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({
     panels: true,
     vitesse: true,
@@ -620,54 +645,78 @@ export function DashboardCeremap3D() {
   }, []);
   const allRecords = useMemo(() => allFeatures.map((feature) => mapFeatureToRecord(feature)), [allFeatures]);
 
-  const availableTenants = useMemo(
-    () => Array.from(new Set(allRecords.map((record) => record.tenantId).filter((value) => value !== "N/A"))).sort(),
-    [allRecords],
-  );
-  const availableScopes = useMemo(
-    () => Array.from(new Set(allRecords.map((record) => record.scope).filter((value) => value !== "N/A"))).sort(),
-    [allRecords],
-  );
-  const availableCategories = useMemo(
-    () => Array.from(new Set(allRecords.map((record) => record.category).filter((value) => value !== "N/A"))).sort(),
-    [allRecords],
-  );
-  const availableTypeCodes = useMemo(
-    () => Array.from(new Set(allRecords.map((record) => record.typePanneauCode).filter((value) => value !== "N/A"))).sort(),
-    [allRecords],
-  );
-  const availableRoutes = useMemo(
-    () => Array.from(new Set(allRecords.map((record) => record.route).filter((value) => value !== "N/A"))).sort(),
-    [allRecords],
-  );
+  const availableCatireveCategories = useMemo(() => getFilterOptions(allRecords, (record) => record.catireveCategory), [allRecords]);
+  const availableTypePanneaux = useMemo(() => getFilterOptions(allRecords, (record) => record.typePanneauCode), [allRecords]);
+  const availableGammePanneaux = useMemo(() => getFilterOptions(allRecords, (record) => record.gammePanneau), [allRecords]);
+  const availablePositionPanneaux = useMemo(() => getFilterOptions(allRecords, (record) => record.positionPanneau), [allRecords]);
+  const availableRoutes = useMemo(() => getFilterOptions(allRecords, (record) => record.route), [allRecords]);
+  const availableCotes = useMemo(() => getFilterOptions(allRecords, (record) => record.cote), [allRecords]);
+  const availablePloDebuts = useMemo(() => getFilterOptions(allRecords, (record) => record.ploDebut), [allRecords]);
+  const availableArretesNecessaires = useMemo(() => getFilterOptions(allRecords, (record) => record.arreteNecessaire), [allRecords]);
+  const availableTypeEmprises = useMemo(() => getFilterOptions(allRecords, (record) => record.typeEmprise), [allRecords]);
+  const availablePdfFilenames = useMemo(() => getFilterOptions(allRecords, (record) => record.pdfFilename), [allRecords]);
+  const availablePanonceaux = useMemo(() => getFilterOptions(allRecords, (record) => record.panonceaux), [allRecords]);
+  const availableVehicleTypes = useMemo(() => getFilterOptions(allRecords, (record) => record.vehicleType), [allRecords]);
+  const availableDecisionAttachments = useMemo(() => ["Oui", "Non"], []);
 
   const filteredRecords = useMemo(() => {
     return allRecords.filter((record) => {
-      if (selectedTenant !== "all" && record.tenantId !== selectedTenant) {
+      if (selectedCatireveCategory !== "all" && record.catireveCategory !== selectedCatireveCategory) {
         return false;
       }
-      if (selectedScope !== "all" && record.scope !== selectedScope) {
+      if (selectedTypePanneau !== "all" && record.typePanneauCode !== selectedTypePanneau) {
         return false;
       }
-      if (selectedCategory !== "all" && record.category !== selectedCategory) {
+      if (selectedGammePanneau !== "all" && record.gammePanneau !== selectedGammePanneau) {
         return false;
       }
-      if (selectedTypeCode !== "all" && record.typePanneauCode !== selectedTypeCode) {
+      if (selectedPositionPanneau !== "all" && record.positionPanneau !== selectedPositionPanneau) {
         return false;
       }
       if (selectedRoute !== "all" && record.route !== selectedRoute) {
         return false;
       }
-      return recordMatchesSearch(record, searchValue);
+      if (selectedCote !== "all" && record.cote !== selectedCote) {
+        return false;
+      }
+      if (selectedPloDebut !== "all" && record.ploDebut !== selectedPloDebut) {
+        return false;
+      }
+      if (selectedArreteNecessaire !== "all" && record.arreteNecessaire !== selectedArreteNecessaire) {
+        return false;
+      }
+      if (selectedTypeEmprise !== "all" && record.typeEmprise !== selectedTypeEmprise) {
+        return false;
+      }
+      if (selectedPdfFilename !== "all" && record.pdfFilename !== selectedPdfFilename) {
+        return false;
+      }
+      if (selectedPanonceaux !== "all" && record.panonceaux !== selectedPanonceaux) {
+        return false;
+      }
+      if (selectedVehicleType !== "all" && record.vehicleType !== selectedVehicleType) {
+        return false;
+      }
+      if (selectedDecisionAttachment !== "all" && record.hasDecisionLabel !== selectedDecisionAttachment) {
+        return false;
+      }
+      return true;
     });
   }, [
     allRecords,
-    searchValue,
-    selectedCategory,
+    selectedArreteNecessaire,
+    selectedCatireveCategory,
+    selectedCote,
+    selectedDecisionAttachment,
+    selectedGammePanneau,
+    selectedPanonceaux,
+    selectedPdfFilename,
+    selectedPloDebut,
+    selectedPositionPanneau,
     selectedRoute,
-    selectedScope,
-    selectedTenant,
-    selectedTypeCode,
+    selectedTypeEmprise,
+    selectedTypePanneau,
+    selectedVehicleType,
   ]);
 
   const siteGroups = useMemo(() => {
@@ -1063,20 +1112,10 @@ export function DashboardCeremap3D() {
       <div className={styles.filters}>
         <div className={styles.filterRowInline}>
           <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Recherche</span>
-            <input
-              className={styles.searchInput}
-              type="text"
-              placeholder="entity id, code panneau, route, scope, categorie"
-              value={searchValue}
-              onChange={(event) => setSearchValue(event.target.value)}
-            />
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Categorie</span>
-            <select className={styles.searchInput} value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>
+            <span className={styles.filterLabel}>Categorie de panneau</span>
+            <select className={styles.searchInput} value={selectedCatireveCategory} onChange={(event) => setSelectedCatireveCategory(event.target.value)}>
               <option value="all">Toutes</option>
-              {availableCategories.map((value) => (
+              {availableCatireveCategories.map((value) => (
                 <option key={value} value={value}>
                   {value}
                 </option>
@@ -1084,10 +1123,21 @@ export function DashboardCeremap3D() {
             </select>
           </div>
           <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Code panneau</span>
-            <select className={styles.searchInput} value={selectedTypeCode} onChange={(event) => setSelectedTypeCode(event.target.value)}>
+            <span className={styles.filterLabel}>Type de panneau</span>
+            <select className={styles.searchInput} value={selectedTypePanneau} onChange={(event) => setSelectedTypePanneau(event.target.value)}>
               <option value="all">Tous</option>
-              {availableTypeCodes.map((value) => (
+              {availableTypePanneaux.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>Gamme de panneau</span>
+            <select className={styles.searchInput} value={selectedGammePanneau} onChange={(event) => setSelectedGammePanneau(event.target.value)}>
+              <option value="all">Tous</option>
+              {availableGammePanneaux.map((value) => (
                 <option key={value} value={value}>
                   {value}
                 </option>
@@ -1098,21 +1148,10 @@ export function DashboardCeremap3D() {
 
         <div className={styles.filterRowInline}>
           <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Tenant</span>
-            <select className={styles.searchInput} value={selectedTenant} onChange={(event) => setSelectedTenant(event.target.value)}>
+            <span className={styles.filterLabel}>Position du panneau</span>
+            <select className={styles.searchInput} value={selectedPositionPanneau} onChange={(event) => setSelectedPositionPanneau(event.target.value)}>
               <option value="all">Tous</option>
-              {availableTenants.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Scope</span>
-            <select className={styles.searchInput} value={selectedScope} onChange={(event) => setSelectedScope(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableScopes.map((value) => (
+              {availablePositionPanneaux.map((value) => (
                 <option key={value} value={value}>
                   {value}
                 </option>
@@ -1122,8 +1161,105 @@ export function DashboardCeremap3D() {
           <div className={styles.filterBlock}>
             <span className={styles.filterLabel}>Route</span>
             <select className={styles.searchInput} value={selectedRoute} onChange={(event) => setSelectedRoute(event.target.value)}>
-              <option value="all">Toutes</option>
+              <option value="all">Tous</option>
               {availableRoutes.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>Cote circulee</span>
+            <select className={styles.searchInput} value={selectedCote} onChange={(event) => setSelectedCote(event.target.value)}>
+              <option value="all">Toutes</option>
+              {availableCotes.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className={styles.filterRowInline}>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>PLO de debut</span>
+            <select className={styles.searchInput} value={selectedPloDebut} onChange={(event) => setSelectedPloDebut(event.target.value)}>
+              <option value="all">Tous</option>
+              {availablePloDebuts.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>Arrete necessaire</span>
+            <select className={styles.searchInput} value={selectedArreteNecessaire} onChange={(event) => setSelectedArreteNecessaire(event.target.value)}>
+              <option value="all">Tous</option>
+              {availableArretesNecessaires.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>Type d'arrete</span>
+            <select className={styles.searchInput} value={selectedTypeEmprise} onChange={(event) => setSelectedTypeEmprise(event.target.value)}>
+              <option value="all">Tous</option>
+              {availableTypeEmprises.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className={styles.filterRowInline}>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>Nom de l'arrete PDF</span>
+            <select className={styles.searchInput} value={selectedPdfFilename} onChange={(event) => setSelectedPdfFilename(event.target.value)}>
+              <option value="all">Tous</option>
+              {availablePdfFilenames.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>Panneaux complementaires</span>
+            <select className={styles.searchInput} value={selectedPanonceaux} onChange={(event) => setSelectedPanonceaux(event.target.value)}>
+              <option value="all">Tous</option>
+              {availablePanonceaux.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>VL-PL</span>
+            <select className={styles.searchInput} value={selectedVehicleType} onChange={(event) => setSelectedVehicleType(event.target.value)}>
+              <option value="all">Tous</option>
+              {availableVehicleTypes.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className={styles.filterRowInline}>
+          <div className={styles.filterBlock}>
+            <span className={styles.filterLabel}>Rattachement a un arrete</span>
+            <select className={styles.searchInput} value={selectedDecisionAttachment} onChange={(event) => setSelectedDecisionAttachment(event.target.value)}>
+              <option value="all">Tous</option>
+              {availableDecisionAttachments.map((value) => (
                 <option key={value} value={value}>
                   {value}
                 </option>
