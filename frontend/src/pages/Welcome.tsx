@@ -26,6 +26,13 @@ const fallbackDashboards: DashboardCard[] = [
       "Pilotage territorial des secteurs scolaires avec visualisation cartographique et indicateurs.",
     route: "/dashboards/secteurscolaire",
   },
+  {
+    id: "ceremap3d",
+    title: "ceremap3d",
+    description:
+      "Lecture cartographique de la vue Ceremap3D avec filtrage des entites, details et exploration spatiale.",
+    route: "/dashboards/ceremap3d",
+  },
 ];
 
 function toRoute(slug: string) {
