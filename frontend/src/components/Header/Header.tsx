@@ -1,11 +1,30 @@
+import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { isAuthenticated } from "../../auth";
+import { isAuthenticated, validateSession } from "../../auth";
 import styles from "./Header.module.css";
 
 const logo = "/logo cerema.png";
 
 export function Header() {
-  const authenticated = isAuthenticated();
+  const [authenticated, setAuthenticated] = useState(isAuthenticated());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkSession() {
+      const ok = await validateSession();
+      if (!cancelled) {
+        setAuthenticated(ok);
+      }
+    }
+
+    void checkSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const navItems = [
     { label: "Accueil", to: "/" },
     { label: "Realisations", to: "/projets" },

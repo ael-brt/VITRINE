@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { fetchDashboardBySlug } from "../api/client";
-import { getAuthToken } from "../auth";
 import styles from "./Dashboard.module.css";
 
 const DEFAULT_TITLE = "Dashboard floatingcardata";
@@ -406,11 +405,9 @@ export function DashboardFloatingCarData() {
     let cancelled = false;
     async function load() {
       try {
-        const token = getAuthToken();
-        const headers: HeadersInit = token ? { Authorization: `Token ${token}` } : {};
         const [dashboard, geojsonResponse] = await Promise.all([
           fetchDashboardBySlug("floatingcardata"),
-          fetch(GEOJSON_URL, { headers }),
+          fetch(GEOJSON_URL, { credentials: "include" }),
         ]);
         if (!geojsonResponse.ok) {
           throw new Error(`GeoJSON non disponible (${geojsonResponse.status}).`);

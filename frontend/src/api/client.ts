@@ -8,7 +8,6 @@ import type {
   Project,
   RoadSegment,
 } from "../types/domain";
-import { getAuthToken } from "../auth";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL?.trim() || "/api/v1"
@@ -231,10 +230,9 @@ function toDashboardJoinKpisData(item: ApiDashboardJoinedData): DashboardJoinKpi
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const token = getAuthToken();
-  const headers: HeadersInit = token ? { Authorization: `Token ${token}` } : {};
-
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
+  });
 
   if (!response.ok) {
     throw new Error(`API request failed (${response.status}) for ${path}`);

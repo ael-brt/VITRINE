@@ -1,36 +1,53 @@
 const AUTH_TOKEN_STORAGE_KEY = "vitrine.auth.token";
+const AUTH_SESSION_STORAGE_KEY = "vitrine.auth.session";
 
 function getApiBaseUrl() {
   return (import.meta.env.VITE_API_BASE_URL?.trim() || "/api/v1").replace(/\/+$/, "");
 }
 
-export function getAuthToken() {
+function clearLegacyToken() {
   if (typeof window === "undefined") {
-    return null;
+    return;
   }
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
 
-  return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+function setSessionAuthenticated(value: boolean) {
+  if (typeof window !== "undefined") {
+    if (value) {
+      window.sessionStorage.setItem(AUTH_SESSION_STORAGE_KEY, "true");
+    } else {
+      window.sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    }
+  }
+}
+
+function readSessionAuthenticated() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY) === "true";
+}
+
+function getCsrfToken() {
+  if (typeof window !== "undefined") {
+    const cookie = window.document.cookie
+      .split("; ")
+      .find((entry) => entry.startsWith("csrftoken="));
+    return cookie ? decodeURIComponent(cookie.split("=").slice(1).join("=")) : null;
+  }
+  return null;
 }
 
 export function isAuthenticated() {
-  return !!getAuthToken();
-}
-
-function storeToken(token: string) {
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-  }
-}
-
-function clearToken() {
-  if (typeof window !== "undefined") {
-    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
-  }
+  return readSessionAuthenticated();
 }
 
 export async function login(username: string, password: string) {
+  clearLegacyToken();
   const response = await fetch(`${getApiBaseUrl()}/accounts/login/`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
@@ -41,63 +58,61 @@ export async function login(username: string, password: string) {
   });
 
   if (!response.ok) {
-    clearToken();
+    setSessionAuthenticated(false);
     return false;
   }
 
-  const payload = (await response.json()) as { token?: string };
+  const payload = (await response.json()) as { authenticated?: boolean };
 
-  if (!payload.token) {
-    clearToken();
+  if (!payload.authenticated) {
+    setSessionAuthenticated(false);
     return false;
   }
 
-  storeToken(payload.token);
+  setSessionAuthenticated(true);
   return true;
 }
 
 export async function logout() {
-  const token = getAuthToken();
+  clearLegacyToken();
+  const csrfToken = getCsrfToken();
 
-  if (token) {
+  if (isAuthenticated()) {
     try {
       await fetch(`${getApiBaseUrl()}/accounts/logout/`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          Authorization: `Token ${token}`,
           "Content-Type": "application/json",
+          ...(csrfToken ? { "X-CSRFToken": csrfToken } : {}),
         },
         body: "{}",
       });
     } catch {
-      // Silent fallback: token is removed locally regardless.
+      // Silent fallback: client session is removed locally regardless.
     }
   }
 
-  clearToken();
+  setSessionAuthenticated(false);
 }
 
 export async function validateSession() {
-  const token = getAuthToken();
-
-  if (!token) {
-    return false;
-  }
+  clearLegacyToken();
 
   try {
     const response = await fetch(`${getApiBaseUrl()}/accounts/me/`, {
-      headers: {
-        Authorization: `Token ${token}`,
-      },
+      credentials: "include",
     });
 
     if (!response.ok) {
-      clearToken();
+      setSessionAuthenticated(false);
       return false;
     }
 
+    setSessionAuthenticated(true);
     return true;
   } catch {
+    setSessionAuthenticated(false);
     return false;
   }
 }

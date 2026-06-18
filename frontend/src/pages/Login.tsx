@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { isAuthenticated, login } from "../auth";
+import { isAuthenticated, login, validateSession } from "../auth";
 import styles from "./Login.module.css";
 
 export function Login() {
@@ -10,8 +10,26 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [hasValidSession, setHasValidSession] = useState(isAuthenticated());
 
-  if (isAuthenticated()) {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkSession() {
+      const ok = await validateSession();
+      if (!cancelled) {
+        setHasValidSession(ok);
+      }
+    }
+
+    void checkSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (hasValidSession) {
     return <Navigate to="/dashboardhome" replace />;
   }
 
@@ -26,6 +44,7 @@ export function Login() {
       return;
     }
 
+    setHasValidSession(true);
     navigate("/dashboardhome", { replace: true });
   }
 

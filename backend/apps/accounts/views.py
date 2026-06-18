@@ -1,6 +1,8 @@
 from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.middleware.csrf import get_token
+from django.conf import settings
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -10,6 +12,26 @@ from rest_framework.views import APIView
 
 from apps.datahub.models import Environment
 from apps.datahub.security import user_environment_ids
+
+
+def _set_auth_cookie(response: Response, token: Token) -> None:
+    response.set_cookie(
+        settings.AUTH_TOKEN_COOKIE_NAME,
+        token.key,
+        max_age=max(0, int(settings.AUTH_TOKEN_TTL_SECONDS)),
+        httponly=settings.AUTH_TOKEN_COOKIE_HTTPONLY,
+        secure=settings.AUTH_TOKEN_COOKIE_SECURE,
+        samesite=settings.AUTH_TOKEN_COOKIE_SAMESITE,
+        path=settings.AUTH_TOKEN_COOKIE_PATH,
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(
+        settings.AUTH_TOKEN_COOKIE_NAME,
+        path=settings.AUTH_TOKEN_COOKIE_PATH,
+        samesite=settings.AUTH_TOKEN_COOKIE_SAMESITE,
+    )
 
 
 class LoginView(APIView):
@@ -74,17 +96,20 @@ class LoginView(APIView):
 
         Token.objects.filter(user=user).delete()
         token = Token.objects.create(user=user)
+        get_token(request)
 
-        return Response(
+        response = Response(
             {
-                "token": token.key,
                 "user": {
                     "id": user.id,
                     "username": user.username,
                     "email": user.email,
                 },
+                "authenticated": True,
             }
         )
+        _set_auth_cookie(response, token)
+        return response
 
 
 class LogoutView(APIView):
@@ -94,7 +119,9 @@ class LogoutView(APIView):
         token = getattr(request, "auth", None)
         if token is not None:
             token.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        _clear_auth_cookie(response)
+        return response
 
 
 class MeView(APIView):

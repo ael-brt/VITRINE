@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 import { BaseLayout } from "./layouts/BaseLayout";
-import { isAuthenticated, validateSession } from "./auth";
+import { validateSession } from "./auth";
 import { Home } from "./pages/Home";
 import { Projects } from "./pages/Projects";
 import { ProjectDetail } from "./pages/ProjectDetail";
@@ -25,14 +25,6 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     async function validate() {
-      if (!isAuthenticated()) {
-        if (!cancelled) {
-          setIsValidSession(false);
-          setIsValidating(false);
-        }
-        return;
-      }
-
       const ok = await validateSession();
       if (!cancelled) {
         setIsValidSession(ok);

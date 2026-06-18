@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
 
@@ -23,21 +23,17 @@ def _check_database() -> ServiceHealth:
         return ServiceHealth(
             name="database",
             ok=bool(row and row[0] == 1),
-            detail={"engine": settings.DATABASES["default"]["ENGINE"]},
+            detail={},
         )
-    except Exception as exc:
+    except Exception:
         return ServiceHealth(
             name="database",
             ok=False,
-            detail={
-                "engine": settings.DATABASES["default"]["ENGINE"],
-                "error": str(exc),
-            },
+            detail={},
         )
 
 
 def _check_cache() -> ServiceHealth:
-    cache_backend = settings.CACHES["default"]["BACKEND"]
     try:
         cache_key = "healthcheck:core:cache"
         cache.set(cache_key, "ok", timeout=5)
@@ -45,23 +41,22 @@ def _check_cache() -> ServiceHealth:
         return ServiceHealth(
             name="cache",
             ok=value == "ok",
-            detail={"backend": cache_backend},
+            detail={},
         )
-    except Exception as exc:
+    except Exception:
         return ServiceHealth(
             name="cache",
             ok=False,
-            detail={"backend": cache_backend, "error": str(exc)},
+            detail={},
         )
 
 
 def _check_celery() -> ServiceHealth:
-    broker_url = getattr(settings, "CELERY_BROKER_URL", "")
-    if not broker_url:
+    if not os.getenv("CELERY_BROKER_URL"):
         return ServiceHealth(
             name="celery",
             ok=False,
-            detail={"broker_url": "", "error": "CELERY_BROKER_URL not configured"},
+            detail={},
         )
 
     try:
@@ -72,13 +67,13 @@ def _check_celery() -> ServiceHealth:
         return ServiceHealth(
             name="celery",
             ok=True,
-            detail={"broker_url": broker_url},
+            detail={},
         )
-    except Exception as exc:
+    except Exception:
         return ServiceHealth(
             name="celery",
             ok=False,
-            detail={"broker_url": broker_url, "error": str(exc)},
+            detail={},
         )
 
 

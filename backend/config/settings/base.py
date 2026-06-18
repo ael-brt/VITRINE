@@ -6,6 +6,14 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()]
+CSRF_TRUSTED_ORIGINS = [
+    value.strip()
+    for value in os.getenv(
+        "CSRF_TRUSTED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000",
+    ).split(",")
+    if value.strip()
+]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -127,6 +135,7 @@ CORS_ALLOWED_ORIGINS = [
     ).split(",")
     if value.strip()
 ]
+CORS_ALLOW_CREDENTIALS = True
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1")
 USE_REDIS_CACHE = os.getenv("USE_REDIS_CACHE", "false").lower() == "true"
@@ -163,3 +172,8 @@ CELERY_BEAT_SCHEDULE = {}
 
 AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", "86400"))
 DATAHUB_SQL_VIEW_STATEMENT_TIMEOUT_MS = int(os.getenv("DATAHUB_SQL_VIEW_STATEMENT_TIMEOUT_MS", "5000"))
+AUTH_TOKEN_COOKIE_NAME = os.getenv("AUTH_TOKEN_COOKIE_NAME", "vitrine_auth_token")
+AUTH_TOKEN_COOKIE_PATH = os.getenv("AUTH_TOKEN_COOKIE_PATH", "/")
+AUTH_TOKEN_COOKIE_SECURE = os.getenv("AUTH_TOKEN_COOKIE_SECURE", "false" if DEBUG else "true").lower() == "true"
+AUTH_TOKEN_COOKIE_HTTPONLY = os.getenv("AUTH_TOKEN_COOKIE_HTTPONLY", "true").lower() == "true"
+AUTH_TOKEN_COOKIE_SAMESITE = os.getenv("AUTH_TOKEN_COOKIE_SAMESITE", "Lax")
