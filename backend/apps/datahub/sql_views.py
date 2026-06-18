@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from django.conf import settings
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 
 from .models import EntityTable, SqlView
@@ -105,13 +105,14 @@ def deploy_sql_view(view: SqlView) -> str:
     relation = _relation_name(view)
     qrel = connection.ops.quote_name(relation)
     try:
-        with connection.cursor() as cursor:
-            _apply_statement_timeout(cursor)
-            _drop_relation_if_exists(cursor, relation)
-            if view.storage_mode == SqlView.StorageMode.MATERIALIZED_VIEW:
-                cursor.execute(f"CREATE MATERIALIZED VIEW {qrel} AS {query}")
-            else:
-                cursor.execute(f"CREATE VIEW {qrel} AS {query}")
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                _apply_statement_timeout(cursor)
+                _drop_relation_if_exists(cursor, relation)
+                if view.storage_mode == SqlView.StorageMode.MATERIALIZED_VIEW:
+                    cursor.execute(f"CREATE MATERIALIZED VIEW {qrel} AS {query}")
+                else:
+                    cursor.execute(f"CREATE VIEW {qrel} AS {query}")
         view.db_relation_name = relation
         view.last_refresh_status = "ready"
         view.last_refresh_error = ""
