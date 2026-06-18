@@ -326,6 +326,24 @@ Le bouton `Voir données` ouvre la même interface de prévisualisation que pour
 
 Si la vue n'a pas encore de `db_relation_name`, l'admin demande de la déployer avant prévisualisation.
 
+### SQL sandbox
+
+Depuis la liste `Sql views`, un bouton `SQL sandbox` ouvre un bac à sable SQL en lecture seule.
+
+Ce bac à sable permet de :
+
+- saisir une requête `SELECT` ;
+- limiter le nombre de lignes renvoyées ;
+- tester une jointure ou un filtrage avant de créer une `SqlView` ;
+- voir la liste des relations autorisées.
+
+Restrictions :
+
+- seules les requêtes commençant par `SELECT` sont acceptées ;
+- seules les tables DataHub existantes et les `SqlView` déjà déployées sont autorisées dans `FROM` et `JOIN` ;
+- les requêtes sont encapsulées avec une limite maximale de 500 lignes ;
+- les tokens SQL destructifs restent interdits.
+
 ## Dashboards
 
 Un `Dashboard` décrit une interface métier exposée au frontend et alimentée par une `SqlView`.

@@ -17,9 +17,15 @@ from .models import (
     SqlView,
     Tenant,
 )
-from .sql_views import SqlViewError, deploy_sql_view, drop_sql_view_relation, refresh_materialized_view
+from .sql_views import (
+    SqlViewError,
+    allowed_relation_names,
+    deploy_sql_view,
+    drop_sql_view_relation,
+    execute_sql_sandbox_query,
+    refresh_materialized_view,
+)
 from .table_ops import (
-    DatahubTableError,
     delete_entity_table_physical,
     ensure_entity_table_schema,
     normalize_table_name,
@@ -32,6 +38,20 @@ MAX_ADMIN_IMPORT_LIMIT = 300
 class EntityImportForm(forms.Form):
     mode = forms.ChoiceField(choices=ImportRun.Mode.choices, initial=ImportRun.Mode.UPSERT)
     ngsild_limit = forms.IntegerField(min_value=1, initial=500)
+
+
+class SqlSandboxForm(forms.Form):
+    sql_query = forms.CharField(
+        label="SQL query",
+        widget=forms.Textarea(attrs={"rows": 12, "cols": 140}),
+        help_text="SELECT only. Relations must come from existing DataHub tables or deployed SQL views.",
+    )
+    row_limit = forms.IntegerField(
+        min_value=1,
+        max_value=500,
+        initial=100,
+        help_text="Maximum number of preview rows.",
+    )
 
 
 @admin.register(Tenant)
@@ -311,6 +331,8 @@ class EntityTableAdmin(admin.ModelAdmin):
 
 @admin.register(SqlView)
 class SqlViewAdmin(admin.ModelAdmin):
+    change_form_template = "admin/datahub/sqlview_change_form.html"
+    change_list_template = "admin/datahub/sqlview_change_list.html"
     list_display = ("slug", "storage_mode", "is_active", "data_link", "last_refresh_status", "updated_at")
     search_fields = ("slug", "name", "db_relation_name")
     filter_horizontal = ("environments",)
@@ -326,9 +348,19 @@ class SqlViewAdmin(admin.ModelAdmin):
 
         urls = super().get_urls()
         custom = [
+            path("sandbox/", self.admin_site.admin_view(self.sandbox_view), name="datahub_sqlview_sandbox"),
             path("<int:view_id>/data/", self.admin_site.admin_view(self.data_view), name="datahub_sqlview_data"),
         ]
         return custom + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["sql_sandbox_url"] = reverse("admin:datahub_sqlview_sandbox")
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
+        context["sql_sandbox_url"] = reverse("admin:datahub_sqlview_sandbox")
+        return super().render_change_form(request, context, add=add, change=change, form_url=form_url, obj=obj)
 
     def save_model(self, request, obj, form, change):
         if not obj.db_relation_name:
@@ -390,6 +422,46 @@ class SqlViewAdmin(admin.ModelAdmin):
             except Exception as exc:
                 self.message_user(request, f"{view.slug}: {exc}", level=messages.ERROR)
         self.message_user(request, f"Refreshed {ok} materialized view(s)")
+
+    def sandbox_view(self, request):
+        from django.shortcuts import render
+
+        allowed_relations = allowed_relation_names()
+        initial_sql = ""
+        if allowed_relations:
+            initial_sql = f"SELECT * FROM {allowed_relations[0]}"
+
+        columns: list[str] = []
+        rows: list[tuple] = []
+        executed_sql = ""
+
+        if request.method == "POST":
+            form = SqlSandboxForm(request.POST)
+            if form.is_valid():
+                try:
+                    executed_sql, columns, rows = execute_sql_sandbox_query(
+                        form.cleaned_data["sql_query"],
+                        row_limit=form.cleaned_data["row_limit"],
+                    )
+                except SqlViewError as exc:
+                    form.add_error("sql_query", str(exc))
+                except Exception as exc:
+                    form.add_error(None, f"SQL execution failed: {exc}")
+        else:
+            form = SqlSandboxForm(initial={"sql_query": initial_sql, "row_limit": 100})
+
+        return render(
+            request,
+            "admin/datahub/sql_sandbox.html",
+            {
+                "title": "SQL sandbox",
+                "form": form,
+                "allowed_relations": allowed_relations,
+                "columns": columns,
+                "rows": rows,
+                "executed_sql": executed_sql,
+            },
+        )
 
     def data_view(self, request, view_id: int):
         from django.shortcuts import get_object_or_404, render

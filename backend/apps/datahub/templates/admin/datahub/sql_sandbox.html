@@ -1,0 +1,56 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p>
+  Testez une requête SQL en lecture seule sur les tables DataHub et les vues SQL déjà déployées.
+  Les requêtes sont limitées à <code>SELECT</code> et prévisualisées avec un plafond de lignes.
+</p>
+
+<form method="post" style="margin-bottom: 1.5rem;">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit" class="default">Exécuter</button>
+</form>
+
+<h2>Relations autorisées</h2>
+{% if allowed_relations %}
+  <p style="margin-bottom: .75rem;">
+    {% for relation in allowed_relations %}
+      <code style="display:inline-block; margin:0 .5rem .5rem 0;">{{ relation }}</code>
+    {% endfor %}
+  </p>
+{% else %}
+  <p>Aucune table ou vue SQL disponible.</p>
+{% endif %}
+
+{% if executed_sql %}
+  <h2>Requête exécutée</h2>
+  <pre style="white-space: pre-wrap;">{{ executed_sql }}</pre>
+{% endif %}
+
+{% if rows %}
+  <h2>Résultats</h2>
+  <div style="overflow:auto; max-width: 100%;">
+    <table class="adminlist">
+      <thead>
+        <tr>
+          {% for col in columns %}
+            <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            {% for cell in row %}
+              <td><code>{{ cell }}</code></td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% elif executed_sql %}
+  <p>La requête a été exécutée mais n'a renvoyé aucune ligne.</p>
+{% endif %}
+{% endblock %}
