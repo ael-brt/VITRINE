@@ -1349,7 +1349,7 @@ export function DashboardCeremap3D() {
         </article>
       </div>
 
-      <div className={`${styles.surface} ${styles.surfaceInteractive} ${fullscreenMap ? styles.surfaceInteractiveHidden : ""}`}>
+      <div className={`${styles.surface} ${styles.surfaceInteractive} ${fullscreenMap ? styles.surfaceInteractiveFullscreen : ""}`}>
         <div className={`${styles.mapWrap} ${fullscreenMap ? styles.mapWrapFullscreen : ""}`}>
           <div id="ceremap3d-map" className={`${styles.map} ${styles.mapLarge}`} />
 
@@ -1460,7 +1460,7 @@ export function DashboardCeremap3D() {
           </div>
         </div>
 
-        <aside className={`${styles.sidePanel} ${fullscreenMap ? styles.sidePanelHidden : ""}`}>
+        <aside className={`${styles.sidePanel} ${fullscreenMap ? styles.sidePanelFullscreen : ""}`}>
           <h3 className={styles.panelInfoTitle}>Panneau selectionne</h3>
           {selectedRecord ? (
             <>

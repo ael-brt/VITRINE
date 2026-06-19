@@ -222,7 +222,7 @@
 }
 
 .mapBadgeSecondary {
-  top: 176px;
+  top: 232px;
 }
 
 .mapBadgeLabel {
@@ -476,18 +476,18 @@
   grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
 }
 
-.surfaceInteractiveHidden {
-  border: 0;
-  box-shadow: none;
-  background: transparent;
-}
-
-.mapWrapFullscreen {
+.surfaceInteractiveFullscreen {
   position: fixed;
   inset: 0;
   z-index: 1200;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.mapWrapFullscreen {
   min-height: 100vh;
-  background: #fff;
 }
 
 .mapWrapFullscreen .mapLarge,
@@ -495,8 +495,10 @@
   height: 100vh;
 }
 
-.sidePanelHidden {
-  display: none;
+.sidePanelFullscreen {
+  max-height: 100vh;
+  height: 100vh;
+  border-left: 1px solid rgba(31, 42, 51, 0.1);
 }
 
 .mapInteractive {
