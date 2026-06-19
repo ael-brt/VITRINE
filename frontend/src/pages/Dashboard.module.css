@@ -476,6 +476,29 @@
   grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
 }
 
+.surfaceInteractiveHidden {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.mapWrapFullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  min-height: 100vh;
+  background: #fff;
+}
+
+.mapWrapFullscreen .mapLarge,
+.mapWrapFullscreen .map {
+  height: 100vh;
+}
+
+.sidePanelHidden {
+  display: none;
+}
+
 .mapInteractive {
   position: relative;
   min-height: 520px;

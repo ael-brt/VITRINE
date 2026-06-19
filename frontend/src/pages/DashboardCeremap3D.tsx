@@ -34,8 +34,22 @@ const EMPTY_FEATURES: DashboardFeature[] = [];
 const STACK_RADIUS_DEGREES = 0.00016;
 const SQL_VIEW_PAGE_SIZE = 200;
 
+const BASEMAPS = {
+  plan: {
+    label: "Plan",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "&copy; OpenStreetMap contributors",
+  },
+  orthophoto: {
+    label: "Orthophoto",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri",
+  },
+} as const;
+
 type FeatureProperties = Record<string, unknown>;
 type LayerKey = "panels" | "vitesse" | "depassement" | "plo";
+type BasemapKey = keyof typeof BASEMAPS;
 
 type GeoJsonFeatureCollection = {
   type: "FeatureCollection";
@@ -316,7 +330,9 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
   const typePanneauLabel =
     getStringValue(findPropertyValue(properties, ["description_type_panneau"])) || "N/A";
   const gammePanneau =
-    getStringValue(findPropertyValue(properties, ["apourgamme_gamme", "aPourGamme_gamme"])) || "N/A";
+    getStringValue(
+      findPropertyValue(properties, ["gamme_panneau", "apourgamme_gamme", "aPourGamme_gamme", "gamme"]),
+    ) || "N/A";
   const positionPanneau =
     getStringValue(findPropertyValue(properties, ["apourgeocodage_couloir", "couloir"])) || "N/A";
   const ploDebut =
@@ -516,6 +532,7 @@ async function fetchCeremap3DRowsPage(
 export function DashboardCeremap3D() {
   const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
+  const baseLayerRef = useRef<L.TileLayer | null>(null);
   const dataLayerRef = useRef<L.LayerGroup | null>(null);
   const measureLayerRef = useRef<L.LayerGroup | null>(null);
   const [title, setTitle] = useState(DEFAULT_TITLE);
@@ -552,23 +569,57 @@ export function DashboardCeremap3D() {
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
   const [expandedSiteKey, setExpandedSiteKey] = useState<string | null>(null);
   const [hasAdjustedView, setHasAdjustedView] = useState(false);
+  const [basemap, setBasemap] = useState<BasemapKey>("plan");
+  const [fullscreenMap, setFullscreenMap] = useState(false);
 
   useEffect(() => {
     if (!mapRef.current) {
       mapRef.current = L.map("ceremap3d-map", { zoomControl: false }).setView([46.6, 2.2], 6);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "&copy; OpenStreetMap contributors",
+      const initialBasemap = BASEMAPS.plan;
+      baseLayerRef.current = L.tileLayer(initialBasemap.url, {
+        attribution: initialBasemap.attribution,
       }).addTo(mapRef.current);
       L.control.zoom({ position: "topright" }).addTo(mapRef.current);
     }
 
     return () => {
+      if (baseLayerRef.current) {
+        baseLayerRef.current.remove();
+        baseLayerRef.current = null;
+      }
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!mapRef.current) {
+      return;
+    }
+
+    if (baseLayerRef.current) {
+      baseLayerRef.current.remove();
+    }
+
+    const config = BASEMAPS[basemap];
+    baseLayerRef.current = L.tileLayer(config.url, {
+      attribution: config.attribution,
+    }).addTo(mapRef.current);
+  }, [basemap]);
+
+  useEffect(() => {
+    if (!mapRef.current) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      mapRef.current?.invalidateSize();
+    }, 50);
+
+    return () => window.clearTimeout(timer);
+  }, [fullscreenMap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1298,11 +1349,34 @@ export function DashboardCeremap3D() {
         </article>
       </div>
 
-      <div className={`${styles.surface} ${styles.surfaceInteractive}`}>
-        <div className={styles.mapWrap}>
+      <div className={`${styles.surface} ${styles.surfaceInteractive} ${fullscreenMap ? styles.surfaceInteractiveHidden : ""}`}>
+        <div className={`${styles.mapWrap} ${fullscreenMap ? styles.mapWrapFullscreen : ""}`}>
           <div id="ceremap3d-map" className={`${styles.map} ${styles.mapLarge}`} />
 
           <div className={styles.mapBadge}>
+            <span className={styles.mapBadgeLabel}>Affichage</span>
+            <div className={styles.layerGrid}>
+              <button
+                className={fullscreenMap ? styles.layerToggleActive : styles.layerToggle}
+                onClick={() => setFullscreenMap((current) => !current)}
+              >
+                {fullscreenMap ? "Quitter plein ecran" : "Carte plein ecran"}
+              </button>
+            </div>
+
+            <span className={styles.mapBadgeLabel}>Fond de carte</span>
+            <div className={styles.layerGrid}>
+              {Object.entries(BASEMAPS).map(([key, config]) => (
+                <button
+                  key={key}
+                  className={basemap === key ? styles.layerToggleActive : styles.layerToggle}
+                  onClick={() => setBasemap(key as BasemapKey)}
+                >
+                  {config.label}
+                </button>
+              ))}
+            </div>
+
             <span className={styles.mapBadgeLabel}>Couches</span>
             <div className={styles.layerGrid}>
               <button
@@ -1386,7 +1460,7 @@ export function DashboardCeremap3D() {
           </div>
         </div>
 
-        <aside className={styles.sidePanel}>
+        <aside className={`${styles.sidePanel} ${fullscreenMap ? styles.sidePanelHidden : ""}`}>
           <h3 className={styles.panelInfoTitle}>Panneau selectionne</h3>
           {selectedRecord ? (
             <>
