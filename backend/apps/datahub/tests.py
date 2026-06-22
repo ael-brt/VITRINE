@@ -1,9 +1,16 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.db import connection
 from django.test import TestCase
+from django.test import override_settings
 from django.urls import reverse
+from django.core.files.uploadedfile import SimpleUploadedFile
+from rest_framework.test import APIClient
+import shutil
+import tempfile
 
-from .models import EntityTable, Environment, Tenant
+from .media_storage import resolve_storage_path
+from .models import Dashboard, EntityTable, Environment, EnvironmentAccessGroup, MediaAsset, Tenant
 from .models import SqlView
 from .sql_views import deploy_sql_view
 
@@ -117,3 +124,87 @@ class SqlViewDeploymentTests(TestCase):
             columns = [desc[0] for desc in (cursor.description or [])]
 
         self.assertEqual(columns, ["emprise_vitesse"])
+
+
+@override_settings(MEDIA_INTERNAL_URL_PREFIX="", MEDIA_STORAGE_ROOT=tempfile.mkdtemp(prefix="vitrine-media-tests-"))
+class MediaAssetApiTests(TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        media_root = getattr(settings, "MEDIA_STORAGE_ROOT", "")
+        if media_root:
+            shutil.rmtree(media_root, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="user-a",
+            email="user-a@example.com",
+            password="demo-pass",
+        )
+        self.other_user = user_model.objects.create_user(
+            username="user-b",
+            email="user-b@example.com",
+            password="demo-pass",
+        )
+        self.environment = Environment.objects.create(slug="env-media", name="Env Media")
+        self.group = EnvironmentAccessGroup.objects.create(name="Media readers")
+        self.group.users.add(self.user)
+        self.group.environments.add(self.environment)
+        self.dashboard = Dashboard.objects.create(
+            slug="ceremap3d",
+            title="Ceremap3D",
+            is_protected=True,
+        )
+        self.dashboard.environments.add(self.environment)
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_media_asset_upload_and_download(self):
+        uploaded_file = SimpleUploadedFile("photo-test.jpg", b"fake-image-content", content_type="image/jpeg")
+        response = self.client.post(
+            reverse("datahub-media-assets"),
+            {
+                "file": uploaded_file,
+                "dashboard_slug": self.dashboard.slug,
+                "entity_type": "Panneau",
+                "entity_id": "urn:ngsi-ld:Panneau:1",
+                "category": MediaAsset.Category.PHOTO,
+                "title": "Photo panneau",
+            },
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 201)
+        asset_id = response.data["id"]
+        asset = MediaAsset.objects.get(id=asset_id)
+        self.assertTrue(resolve_storage_path(asset.storage_key).exists())
+
+        list_response = self.client.get(
+            reverse("datahub-media-assets"),
+            {"dashboard_slug": self.dashboard.slug, "entity_type": "Panneau", "entity_id": "urn:ngsi-ld:Panneau:1"},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data["total_items"], 1)
+
+        file_response = self.client.get(reverse("datahub-media-asset-file", args=[asset_id]))
+        self.assertEqual(file_response.status_code, 200)
+        self.assertEqual(b"".join(file_response.streaming_content), b"fake-image-content")
+
+    def test_media_asset_access_denied_without_environment_access(self):
+        asset = MediaAsset.objects.create(
+            dashboard=self.dashboard,
+            entity_type="Panneau",
+            entity_id="urn:ngsi-ld:Panneau:2",
+            category=MediaAsset.Category.PHOTO,
+            title="Denied asset",
+            storage_key="ceremap3d/panneau/demo/file.jpg",
+            original_name="file.jpg",
+            mime_type="image/jpeg",
+            size_bytes=4,
+        )
+        asset.environments.add(self.environment)
+
+        denied_client = APIClient()
+        denied_client.force_authenticate(user=self.other_user)
+        response = denied_client.get(reverse("datahub-media-asset-detail", args=[asset.id]))
+        self.assertEqual(response.status_code, 403)

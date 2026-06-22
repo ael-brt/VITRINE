@@ -14,9 +14,11 @@ from .models import (
     EnvironmentAccessGroup,
     ImportLog,
     ImportRun,
+    MediaAsset,
     SqlView,
     Tenant,
 )
+from .media_storage import delete_storage_file, store_uploaded_file
 from .sql_views import (
     SqlViewError,
     allowed_relation_names,
@@ -54,6 +56,23 @@ class SqlSandboxForm(forms.Form):
     )
 
 
+class MediaAssetAdminForm(forms.ModelForm):
+    upload_file = forms.FileField(
+        required=False,
+        help_text="Upload a new file. On update, the previous physical file is replaced.",
+    )
+
+    class Meta:
+        model = MediaAsset
+        fields = "__all__"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not self.instance.pk and not cleaned_data.get("upload_file"):
+            self.add_error("upload_file", "A file is required when creating a media asset.")
+        return cleaned_data
+
+
 @admin.register(Tenant)
 class TenantAdmin(admin.ModelAdmin):
     list_display = ("slug", "name", "api_tenant_value", "is_active", "updated_at")
@@ -85,6 +104,53 @@ class DashboardAdmin(admin.ModelAdmin):
     search_fields = ("slug", "title", "description")
     list_filter = ("is_active", "is_protected")
     filter_horizontal = ("environments",)
+
+
+@admin.register(MediaAsset)
+class MediaAssetAdmin(admin.ModelAdmin):
+    form = MediaAssetAdminForm
+    list_display = ("id", "dashboard", "category", "entity_type", "entity_id", "original_name", "size_bytes", "is_public", "updated_at")
+    search_fields = ("dashboard__slug", "entity_type", "entity_id", "original_name", "title", "description", "storage_key")
+    list_filter = ("dashboard", "category", "is_public")
+    filter_horizontal = ("environments",)
+    readonly_fields = ("storage_key", "original_name", "mime_type", "size_bytes", "checksum_sha256", "uploaded_by", "created_at", "updated_at")
+
+    def save_model(self, request, obj, form, change):
+        uploaded_file = form.cleaned_data.get("upload_file")
+        if uploaded_file:
+            old_storage_key = None
+            if change and obj.pk:
+                old_storage_key = MediaAsset.objects.only("storage_key").get(pk=obj.pk).storage_key
+            stored = store_uploaded_file(
+                uploaded_file,
+                dashboard_slug=obj.dashboard.slug if obj.dashboard_id and obj.dashboard else "global",
+                entity_type=obj.entity_type or "asset",
+                entity_id=obj.entity_id or "",
+            )
+            obj.storage_key = str(stored["storage_key"])
+            obj.original_name = str(stored["original_name"])
+            obj.mime_type = str(stored["mime_type"])
+            obj.size_bytes = int(stored["size_bytes"])
+            obj.checksum_sha256 = str(stored["checksum_sha256"])
+            if not obj.uploaded_by_id:
+                obj.uploaded_by = request.user
+            super().save_model(request, obj, form, change)
+            if old_storage_key and old_storage_key != obj.storage_key:
+                delete_storage_file(old_storage_key)
+            return
+        super().save_model(request, obj, form, change)
+
+    def delete_model(self, request, obj):
+        storage_key = obj.storage_key
+        super().delete_model(request, obj)
+        if storage_key:
+            delete_storage_file(storage_key)
+
+    def delete_queryset(self, request, queryset):
+        storage_keys = list(queryset.exclude(storage_key="").values_list("storage_key", flat=True))
+        super().delete_queryset(request, queryset)
+        for storage_key in storage_keys:
+            delete_storage_file(storage_key)
 
 
 @admin.register(EntityTable)

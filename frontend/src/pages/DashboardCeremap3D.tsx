@@ -65,6 +65,7 @@ type DashboardFeature = GeoJsonFeatureCollection["features"][number];
 
 type CeremapRecord = {
   key: string;
+  sourceKind: "panel" | "vitesse" | "depassement" | "other";
   title: string;
   tenantId: string;
   entityType: string;
@@ -108,6 +109,23 @@ type CeremapRecord = {
 
 type LayerVisibility = Record<LayerKey, boolean>;
 type MeasurePoint = { latlng: L.LatLng; label: string };
+type FilterSectionKey = "signalisation" | "implantation" | "arretes" | "affichage";
+type FilterKey =
+  | "catireveCategory"
+  | "typePanneau"
+  | "gammePanneau"
+  | "positionPanneau"
+  | "route"
+  | "cote"
+  | "ploDebut"
+  | "arreteNecessaire"
+  | "typeEmprise"
+  | "pdfFilename"
+  | "panonceaux"
+  | "vehicleType"
+  | "decisionAttachment";
+
+type FilterState = Record<FilterKey, string>;
 
 function isFeatureProperties(value: unknown): value is FeatureProperties {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -321,6 +339,15 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     getStringValue(findPropertyValue(properties, ["entity_type", "type"])) ||
     feature.geometry?.type ||
     "Inconnu";
+  const normalizedEntityType = normalizeKey(entityType);
+  const sourceKind =
+    normalizedEntityType === "panneau"
+      ? "panel"
+      : normalizedEntityType === "emprisevitesse"
+        ? "vitesse"
+        : normalizedEntityType === "emprisedepass"
+          ? "depassement"
+          : "other";
   const category = getStringValue(findPropertyValue(properties, ["categorie"])) || "N/A";
   const catireveCategory =
     getStringValue(findPropertyValue(properties, ["type_panneau_catireve"])) ||
@@ -339,10 +366,15 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     getStringValue(findPropertyValue(properties, ["nomplodeb", "nomPloDeb"])) || "N/A";
   const arreteNecessaire =
     getStringValue(findPropertyValue(properties, ["apourtype_pardecision", "type_panneau_pardecision"])) || "N/A";
+  const typeEmprise = getStringValue(findPropertyValue(properties, ["type_emprise"])) || "N/A";
   const pointTitle =
-    getStringValue(findPropertyValue(properties, ["description_type_panneau"])) ||
-    typePanneauCode ||
-    entityId;
+    sourceKind === "panel"
+      ? getStringValue(findPropertyValue(properties, ["description_type_panneau"])) ||
+        typePanneauCode ||
+        entityId
+      : typeEmprise !== "N/A"
+        ? typeEmprise
+        : getStringValue(findPropertyValue(properties, ["description_type_panneau"])) || entityId;
   const firstImagePath = getStringValue(findPropertyValue(properties, ["first_image_path"]));
   const pdfFilename =
     getStringValue(findPropertyValue(properties, ["pdf_filename"])) || "N/A";
@@ -362,6 +394,7 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
 
   return {
     key: getFeatureKey(feature),
+    sourceKind,
     title: pointTitle,
     tenantId: getStringValue(findPropertyValue(properties, ["tenant_id", "tenant"])) || "N/A",
     entityType,
@@ -377,7 +410,7 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     arreteNecessaire,
     typePanneauActuel: getStringValue(findPropertyValue(properties, ["type_panneau_actuel"])) || "N/A",
     typePanneauParDecision: getStringValue(findPropertyValue(properties, ["type_panneau_pardecision"])) || "N/A",
-    typeEmprise: getStringValue(findPropertyValue(properties, ["type_emprise"])) || "N/A",
+    typeEmprise,
     route: getStringValue(findPropertyValue(properties, ["route"])) || "N/A",
     cote: getStringValue(findPropertyValue(properties, ["cote"])) || "N/A",
     couloir: getStringValue(findPropertyValue(properties, ["couloir"])) || "N/A",
@@ -476,7 +509,10 @@ function computeBounds(records: CeremapRecord[], visibility: LayerVisibility, po
 }
 
 function createMeasureLabel(index: number): string {
-  return index === 0 ? "A" : index === 1 ? "B" : String(index + 1);
+  if (index < 26) {
+    return String.fromCharCode(65 + index);
+  }
+  return `P${index + 1}`;
 }
 
 function getFilterOptions(records: CeremapRecord[], pick: (record: CeremapRecord) => string): string[] {
@@ -487,6 +523,49 @@ function getFilterOptions(records: CeremapRecord[], pick: (record: CeremapRecord
         .filter((value) => value && value !== "N/A"),
     ),
   ).sort((left, right) => left.localeCompare(right, "fr"));
+}
+
+function matchesRecordFilters(record: CeremapRecord, filters: FilterState, excludeKey?: FilterKey): boolean {
+  if (excludeKey !== "catireveCategory" && filters.catireveCategory !== "all" && record.catireveCategory !== filters.catireveCategory) {
+    return false;
+  }
+  if (excludeKey !== "typePanneau" && filters.typePanneau !== "all" && record.typePanneauCode !== filters.typePanneau) {
+    return false;
+  }
+  if (excludeKey !== "gammePanneau" && filters.gammePanneau !== "all" && record.gammePanneau !== filters.gammePanneau) {
+    return false;
+  }
+  if (excludeKey !== "positionPanneau" && filters.positionPanneau !== "all" && record.positionPanneau !== filters.positionPanneau) {
+    return false;
+  }
+  if (excludeKey !== "route" && filters.route !== "all" && record.route !== filters.route) {
+    return false;
+  }
+  if (excludeKey !== "cote" && filters.cote !== "all" && record.cote !== filters.cote) {
+    return false;
+  }
+  if (excludeKey !== "ploDebut" && filters.ploDebut !== "all" && record.ploDebut !== filters.ploDebut) {
+    return false;
+  }
+  if (excludeKey !== "arreteNecessaire" && filters.arreteNecessaire !== "all" && record.arreteNecessaire !== filters.arreteNecessaire) {
+    return false;
+  }
+  if (excludeKey !== "typeEmprise" && filters.typeEmprise !== "all" && record.typeEmprise !== filters.typeEmprise) {
+    return false;
+  }
+  if (excludeKey !== "pdfFilename" && filters.pdfFilename !== "all" && record.pdfFilename !== filters.pdfFilename) {
+    return false;
+  }
+  if (excludeKey !== "panonceaux" && filters.panonceaux !== "all" && record.panonceaux !== filters.panonceaux) {
+    return false;
+  }
+  if (excludeKey !== "vehicleType" && filters.vehicleType !== "all" && record.vehicleType !== filters.vehicleType) {
+    return false;
+  }
+  if (excludeKey !== "decisionAttachment" && filters.decisionAttachment !== "all" && record.hasDecisionLabel !== filters.decisionAttachment) {
+    return false;
+  }
+  return true;
 }
 
 function getNearestSnapPoint(map: L.Map, clickLatLng: L.LatLng, records: CeremapRecord[], pointOffsets: Map<string, L.LatLng>): L.LatLng {
@@ -529,6 +608,47 @@ async function fetchCeremap3DRowsPage(
   throw lastError ?? new Error("Aucune SQL view Ceremap3D disponible.");
 }
 
+function getEmpriseDescription(record: CeremapRecord): string {
+  if (record.typeEmprise !== "N/A") {
+    return record.typeEmprise;
+  }
+  return "Emprise sans type";
+}
+
+function getEmpriseTooltipContent(record: CeremapRecord): string {
+  const parts = [getEmpriseDescription(record)];
+
+  if (record.pdfFilename && record.pdfFilename !== "N/A") {
+    parts.push(record.pdfFilename);
+  }
+
+  return parts.join(" - ");
+}
+
+function buildEmprisePopupContent(record: CeremapRecord): string {
+  const rows = [
+    ["Type d'emprise", record.typeEmprise],
+    ["Route", record.route],
+    ["Cote", record.cote],
+    ["Couloir", record.couloir],
+    ["Vehicule", record.vehicleType],
+    ["Arrete PDF", record.pdfFilename],
+    ["Rattachement", record.hasDecisionLabel],
+  ].filter(([, value]) => value && value !== "N/A");
+
+  return `
+    <div style="display:grid;gap:6px;min-width:220px;">
+      <strong style="font-size:13px;color:#111827;">${getEmpriseDescription(record)}</strong>
+      ${rows
+        .map(
+          ([label, value]) =>
+            `<div style="font-size:12px;line-height:1.35;"><span style="font-weight:700;color:#475467;">${label}:</span> <span style="color:#101828;">${value}</span></div>`,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 export function DashboardCeremap3D() {
   const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
@@ -537,7 +657,6 @@ export function DashboardCeremap3D() {
   const measureLayerRef = useRef<L.LayerGroup | null>(null);
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [description, setDescription] = useState(DEFAULT_DESCRIPTION);
-  const [sqlViewSlug, setSqlViewSlug] = useState<string>(SQL_VIEW_SLUG_CANDIDATES[0] ?? "CEREMAP3D_total_query");
   const [loading, setLoading] = useState(true);
   const [isStreaming, setIsStreaming] = useState(false);
   const [loadedRows, setLoadedRows] = useState(0);
@@ -569,17 +688,26 @@ export function DashboardCeremap3D() {
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
   const [expandedSiteKey, setExpandedSiteKey] = useState<string | null>(null);
   const [hasAdjustedView, setHasAdjustedView] = useState(false);
-  const [basemap, setBasemap] = useState<BasemapKey>("plan");
-  const [fullscreenMap, setFullscreenMap] = useState(false);
+  const [basemap, setBasemap] = useState<BasemapKey>("orthophoto");
+  const [filtersVisible, setFiltersVisible] = useState(true);
+  const [filterSections, setFilterSections] = useState<Record<FilterSectionKey, boolean>>({
+    signalisation: true,
+    implantation: true,
+    arretes: true,
+    affichage: true,
+  });
 
   useEffect(() => {
     if (!mapRef.current) {
-      mapRef.current = L.map("ceremap3d-map", { zoomControl: false }).setView([46.6, 2.2], 6);
-      const initialBasemap = BASEMAPS.plan;
+      mapRef.current = L.map("ceremap3d-map", {
+        zoomControl: false,
+        maxZoom: 24,
+      }).setView([46.6, 2.2], 6);
+      const initialBasemap = BASEMAPS.orthophoto;
       baseLayerRef.current = L.tileLayer(initialBasemap.url, {
         attribution: initialBasemap.attribution,
+        maxZoom: 24,
       }).addTo(mapRef.current);
-      L.control.zoom({ position: "topright" }).addTo(mapRef.current);
     }
 
     return () => {
@@ -606,6 +734,7 @@ export function DashboardCeremap3D() {
     const config = BASEMAPS[basemap];
     baseLayerRef.current = L.tileLayer(config.url, {
       attribution: config.attribution,
+      maxZoom: 24,
     }).addTo(mapRef.current);
   }, [basemap]);
 
@@ -619,7 +748,7 @@ export function DashboardCeremap3D() {
     }, 50);
 
     return () => window.clearTimeout(timer);
-  }, [fullscreenMap]);
+  }, [filtersVisible]);
 
   useEffect(() => {
     let cancelled = false;
@@ -650,7 +779,6 @@ export function DashboardCeremap3D() {
           throw firstPageResult.reason;
         }
 
-        setSqlViewSlug(firstPageResult.value.slug);
         setTotalRows(firstPageResult.value.totalRows);
         setAllFeatures(firstPageResult.value.features);
         setLoadedRows(firstPageResult.value.features.length);
@@ -695,66 +823,138 @@ export function DashboardCeremap3D() {
     };
   }, []);
   const allRecords = useMemo(() => allFeatures.map((feature) => mapFeatureToRecord(feature)), [allFeatures]);
+  const allPanelRecords = useMemo(
+    () => allRecords.filter((record) => record.sourceKind === "panel"),
+    [allRecords],
+  );
+  const filterState = useMemo<FilterState>(
+    () => ({
+      catireveCategory: selectedCatireveCategory,
+      typePanneau: selectedTypePanneau,
+      gammePanneau: selectedGammePanneau,
+      positionPanneau: selectedPositionPanneau,
+      route: selectedRoute,
+      cote: selectedCote,
+      ploDebut: selectedPloDebut,
+      arreteNecessaire: selectedArreteNecessaire,
+      typeEmprise: selectedTypeEmprise,
+      pdfFilename: selectedPdfFilename,
+      panonceaux: selectedPanonceaux,
+      vehicleType: selectedVehicleType,
+      decisionAttachment: selectedDecisionAttachment,
+    }),
+    [
+      selectedArreteNecessaire,
+      selectedCatireveCategory,
+      selectedCote,
+      selectedDecisionAttachment,
+      selectedGammePanneau,
+      selectedPanonceaux,
+      selectedPdfFilename,
+      selectedPloDebut,
+      selectedPositionPanneau,
+      selectedRoute,
+      selectedTypeEmprise,
+      selectedTypePanneau,
+      selectedVehicleType,
+    ],
+  );
 
-  const availableCatireveCategories = useMemo(() => getFilterOptions(allRecords, (record) => record.catireveCategory), [allRecords]);
-  const availableTypePanneaux = useMemo(() => getFilterOptions(allRecords, (record) => record.typePanneauCode), [allRecords]);
-  const availableGammePanneaux = useMemo(() => getFilterOptions(allRecords, (record) => record.gammePanneau), [allRecords]);
-  const availablePositionPanneaux = useMemo(() => getFilterOptions(allRecords, (record) => record.positionPanneau), [allRecords]);
-  const availableRoutes = useMemo(() => getFilterOptions(allRecords, (record) => record.route), [allRecords]);
-  const availableCotes = useMemo(() => getFilterOptions(allRecords, (record) => record.cote), [allRecords]);
-  const availablePloDebuts = useMemo(() => getFilterOptions(allRecords, (record) => record.ploDebut), [allRecords]);
-  const availableArretesNecessaires = useMemo(() => getFilterOptions(allRecords, (record) => record.arreteNecessaire), [allRecords]);
-  const availableTypeEmprises = useMemo(() => getFilterOptions(allRecords, (record) => record.typeEmprise), [allRecords]);
-  const availablePdfFilenames = useMemo(() => getFilterOptions(allRecords, (record) => record.pdfFilename), [allRecords]);
-  const availablePanonceaux = useMemo(() => getFilterOptions(allRecords, (record) => record.panonceaux), [allRecords]);
-  const availableVehicleTypes = useMemo(() => getFilterOptions(allRecords, (record) => record.vehicleType), [allRecords]);
-  const availableDecisionAttachments = useMemo(() => ["Oui", "Non"], []);
+  const optionSourceRecords = useMemo(
+    () => ({
+      catireveCategory: allPanelRecords.filter((record) => matchesRecordFilters(record, filterState, "catireveCategory")),
+      typePanneau: allPanelRecords.filter((record) => matchesRecordFilters(record, filterState, "typePanneau")),
+      gammePanneau: allPanelRecords.filter((record) => matchesRecordFilters(record, filterState, "gammePanneau")),
+      positionPanneau: allPanelRecords.filter((record) => matchesRecordFilters(record, filterState, "positionPanneau")),
+      route: allRecords.filter((record) => matchesRecordFilters(record, filterState, "route")),
+      cote: allRecords.filter((record) => matchesRecordFilters(record, filterState, "cote")),
+      ploDebut: allPanelRecords.filter((record) => matchesRecordFilters(record, filterState, "ploDebut")),
+      arreteNecessaire: allPanelRecords.filter((record) => matchesRecordFilters(record, filterState, "arreteNecessaire")),
+      typeEmprise: allRecords.filter((record) => matchesRecordFilters(record, filterState, "typeEmprise")),
+      pdfFilename: allRecords.filter((record) => matchesRecordFilters(record, filterState, "pdfFilename")),
+      panonceaux: allRecords.filter((record) => matchesRecordFilters(record, filterState, "panonceaux")),
+      vehicleType: allRecords.filter((record) => matchesRecordFilters(record, filterState, "vehicleType")),
+      decisionAttachment: allRecords.filter((record) => matchesRecordFilters(record, filterState, "decisionAttachment")),
+    }),
+    [allPanelRecords, allRecords, filterState],
+  );
+
+  const availableCatireveCategories = useMemo(() => getFilterOptions(optionSourceRecords.catireveCategory, (record) => record.catireveCategory), [optionSourceRecords]);
+  const availableTypePanneaux = useMemo(() => getFilterOptions(optionSourceRecords.typePanneau, (record) => record.typePanneauCode), [optionSourceRecords]);
+  const availableGammePanneaux = useMemo(() => getFilterOptions(optionSourceRecords.gammePanneau, (record) => record.gammePanneau), [optionSourceRecords]);
+  const availablePositionPanneaux = useMemo(() => getFilterOptions(optionSourceRecords.positionPanneau, (record) => record.positionPanneau), [optionSourceRecords]);
+  const availableRoutes = useMemo(() => getFilterOptions(optionSourceRecords.route, (record) => record.route), [optionSourceRecords]);
+  const availableCotes = useMemo(() => getFilterOptions(optionSourceRecords.cote, (record) => record.cote), [optionSourceRecords]);
+  const availablePloDebuts = useMemo(() => getFilterOptions(optionSourceRecords.ploDebut, (record) => record.ploDebut), [optionSourceRecords]);
+  const availableArretesNecessaires = useMemo(() => getFilterOptions(optionSourceRecords.arreteNecessaire, (record) => record.arreteNecessaire), [optionSourceRecords]);
+  const availableTypeEmprises = useMemo(() => getFilterOptions(optionSourceRecords.typeEmprise, (record) => record.typeEmprise), [optionSourceRecords]);
+  const availablePdfFilenames = useMemo(() => getFilterOptions(optionSourceRecords.pdfFilename, (record) => record.pdfFilename), [optionSourceRecords]);
+  const availablePanonceaux = useMemo(() => getFilterOptions(optionSourceRecords.panonceaux, (record) => record.panonceaux), [optionSourceRecords]);
+  const availableVehicleTypes = useMemo(() => getFilterOptions(optionSourceRecords.vehicleType, (record) => record.vehicleType), [optionSourceRecords]);
+  const availableDecisionAttachments = useMemo(() => getFilterOptions(optionSourceRecords.decisionAttachment, (record) => record.hasDecisionLabel), [optionSourceRecords]);
 
   const filteredRecords = useMemo(() => {
-    return allRecords.filter((record) => {
-      if (selectedCatireveCategory !== "all" && record.catireveCategory !== selectedCatireveCategory) {
-        return false;
-      }
-      if (selectedTypePanneau !== "all" && record.typePanneauCode !== selectedTypePanneau) {
-        return false;
-      }
-      if (selectedGammePanneau !== "all" && record.gammePanneau !== selectedGammePanneau) {
-        return false;
-      }
-      if (selectedPositionPanneau !== "all" && record.positionPanneau !== selectedPositionPanneau) {
-        return false;
-      }
-      if (selectedRoute !== "all" && record.route !== selectedRoute) {
-        return false;
-      }
-      if (selectedCote !== "all" && record.cote !== selectedCote) {
-        return false;
-      }
-      if (selectedPloDebut !== "all" && record.ploDebut !== selectedPloDebut) {
-        return false;
-      }
-      if (selectedArreteNecessaire !== "all" && record.arreteNecessaire !== selectedArreteNecessaire) {
-        return false;
-      }
-      if (selectedTypeEmprise !== "all" && record.typeEmprise !== selectedTypeEmprise) {
-        return false;
-      }
-      if (selectedPdfFilename !== "all" && record.pdfFilename !== selectedPdfFilename) {
-        return false;
-      }
-      if (selectedPanonceaux !== "all" && record.panonceaux !== selectedPanonceaux) {
-        return false;
-      }
-      if (selectedVehicleType !== "all" && record.vehicleType !== selectedVehicleType) {
-        return false;
-      }
-      if (selectedDecisionAttachment !== "all" && record.hasDecisionLabel !== selectedDecisionAttachment) {
-        return false;
-      }
-      return true;
-    });
+    return allRecords.filter((record) => matchesRecordFilters(record, filterState));
+  }, [allRecords, filterState]);
+  const filteredPanelRecords = useMemo(
+    () => filteredRecords.filter((record) => record.sourceKind === "panel"),
+    [filteredRecords],
+  );
+
+  useEffect(() => {
+    if (selectedCatireveCategory !== "all" && !availableCatireveCategories.includes(selectedCatireveCategory)) {
+      setSelectedCatireveCategory("all");
+    }
+    if (selectedTypePanneau !== "all" && !availableTypePanneaux.includes(selectedTypePanneau)) {
+      setSelectedTypePanneau("all");
+    }
+    if (selectedGammePanneau !== "all" && !availableGammePanneaux.includes(selectedGammePanneau)) {
+      setSelectedGammePanneau("all");
+    }
+    if (selectedPositionPanneau !== "all" && !availablePositionPanneaux.includes(selectedPositionPanneau)) {
+      setSelectedPositionPanneau("all");
+    }
+    if (selectedRoute !== "all" && !availableRoutes.includes(selectedRoute)) {
+      setSelectedRoute("all");
+    }
+    if (selectedCote !== "all" && !availableCotes.includes(selectedCote)) {
+      setSelectedCote("all");
+    }
+    if (selectedPloDebut !== "all" && !availablePloDebuts.includes(selectedPloDebut)) {
+      setSelectedPloDebut("all");
+    }
+    if (selectedArreteNecessaire !== "all" && !availableArretesNecessaires.includes(selectedArreteNecessaire)) {
+      setSelectedArreteNecessaire("all");
+    }
+    if (selectedTypeEmprise !== "all" && !availableTypeEmprises.includes(selectedTypeEmprise)) {
+      setSelectedTypeEmprise("all");
+    }
+    if (selectedPdfFilename !== "all" && !availablePdfFilenames.includes(selectedPdfFilename)) {
+      setSelectedPdfFilename("all");
+    }
+    if (selectedPanonceaux !== "all" && !availablePanonceaux.includes(selectedPanonceaux)) {
+      setSelectedPanonceaux("all");
+    }
+    if (selectedVehicleType !== "all" && !availableVehicleTypes.includes(selectedVehicleType)) {
+      setSelectedVehicleType("all");
+    }
+    if (selectedDecisionAttachment !== "all" && !availableDecisionAttachments.includes(selectedDecisionAttachment)) {
+      setSelectedDecisionAttachment("all");
+    }
   }, [
-    allRecords,
+    availableArretesNecessaires,
+    availableCatireveCategories,
+    availableCotes,
+    availableDecisionAttachments,
+    availableGammePanneaux,
+    availablePanonceaux,
+    availablePdfFilenames,
+    availablePloDebuts,
+    availablePositionPanneaux,
+    availableRoutes,
+    availableTypeEmprises,
+    availableTypePanneaux,
+    availableVehicleTypes,
     selectedArreteNecessaire,
     selectedCatireveCategory,
     selectedCote,
@@ -776,7 +976,7 @@ export function DashboardCeremap3D() {
       { siteKey: string; records: CeremapRecord[]; baseLatLng: L.LatLng }
     >();
 
-    for (const record of filteredRecords) {
+    for (const record of filteredPanelRecords) {
       if (!record.siteKey || !record.pointGeometry) {
         continue;
       }
@@ -794,11 +994,11 @@ export function DashboardCeremap3D() {
     }
 
     return Array.from(groups.values());
-  }, [filteredRecords]);
+  }, [filteredPanelRecords]);
 
   const pointOffsets = useMemo(
-    () => createSiteOffsets(filteredRecords, expandedSiteKey),
-    [expandedSiteKey, filteredRecords],
+    () => createSiteOffsets(filteredPanelRecords, expandedSiteKey),
+    [expandedSiteKey, filteredPanelRecords],
   );
 
   const selectedRecord = useMemo(() => {
@@ -806,8 +1006,8 @@ export function DashboardCeremap3D() {
       return null;
     }
     const match = filteredRecords.find((record) => record.key === selectedRecordKey);
-    return match ?? filteredRecords[0];
-  }, [filteredRecords, selectedRecordKey]);
+    return match ?? filteredPanelRecords[0] ?? filteredRecords[0];
+  }, [filteredPanelRecords, filteredRecords, selectedRecordKey]);
 
   useEffect(() => {
     if (filteredRecords.length === 0) {
@@ -839,21 +1039,24 @@ export function DashboardCeremap3D() {
   }, [expandedSiteKey, selectedRecord]);
 
   const recordsAtSameSite = useMemo(() => {
-    if (!selectedRecord?.siteKey) {
-      return selectedRecord ? [selectedRecord] : [];
+    if (!selectedRecord || selectedRecord.sourceKind !== "panel") {
+      return [];
     }
-    return filteredRecords.filter((record) => record.siteKey === selectedRecord.siteKey);
-  }, [filteredRecords, selectedRecord]);
+    if (!selectedRecord.siteKey) {
+      return [selectedRecord];
+    }
+    return filteredPanelRecords.filter((record) => record.siteKey === selectedRecord.siteKey);
+  }, [filteredPanelRecords, selectedRecord]);
 
   const nearestRecords = useMemo(() => {
-    if (!selectedRecord?.pointGeometry) {
+    if (!selectedRecord?.pointGeometry || selectedRecord.sourceKind !== "panel") {
       return [];
     }
 
     const [selectedLon, selectedLat] = selectedRecord.pointGeometry.coordinates;
     const selectedLatLng = L.latLng(selectedLat, selectedLon);
 
-    return filteredRecords
+    return filteredPanelRecords
       .filter((record) => record.key !== selectedRecord.key && record.pointGeometry)
       .map((record) => {
         const [lon, lat] = record.pointGeometry!.coordinates;
@@ -862,33 +1065,33 @@ export function DashboardCeremap3D() {
       })
       .sort((left, right) => left.distance - right.distance)
       .slice(0, 10);
-  }, [filteredRecords, selectedRecord]);
+  }, [filteredPanelRecords, selectedRecord]);
 
   const vitesseCount = useMemo(
-    () => filteredRecords.filter((record) => record.vitesseGeometry !== null).length,
+    () => filteredRecords.filter((record) => record.sourceKind === "vitesse" && record.vitesseGeometry !== null).length,
     [filteredRecords],
   );
   const depassementCount = useMemo(
-    () => filteredRecords.filter((record) => record.depassementGeometry !== null).length,
+    () => filteredRecords.filter((record) => record.sourceKind === "depassement" && record.depassementGeometry !== null).length,
     [filteredRecords],
   );
   const duplicateSiteCount = useMemo(() => {
     const counts = new Map<string, number>();
-    filteredRecords.forEach((record) => {
+    filteredPanelRecords.forEach((record) => {
       if (!record.siteKey) {
         return;
       }
       counts.set(record.siteKey, (counts.get(record.siteKey) ?? 0) + 1);
     });
     return Array.from(counts.values()).filter((count) => count > 1).length;
-  }, [filteredRecords]);
+  }, [filteredPanelRecords]);
   const ploCount = useMemo(
-    () => filteredRecords.filter((record) => record.isPlo).length,
-    [filteredRecords],
+    () => filteredPanelRecords.filter((record) => record.isPlo).length,
+    [filteredPanelRecords],
   );
 
   const latestUpdate = useMemo(() => {
-    const timestamps = filteredRecords
+    const timestamps = filteredPanelRecords
       .map((record) => record.updatedAt)
       .filter((value): value is string => Boolean(value))
       .map((value) => new Date(value))
@@ -897,13 +1100,47 @@ export function DashboardCeremap3D() {
       return null;
     }
     return new Date(Math.max(...timestamps.map((value) => value.getTime()))).toISOString();
-  }, [filteredRecords]);
+  }, [filteredPanelRecords]);
+
+  const activeFilterCount = useMemo(() => {
+    return [
+      selectedCatireveCategory,
+      selectedTypePanneau,
+      selectedGammePanneau,
+      selectedPositionPanneau,
+      selectedRoute,
+      selectedCote,
+      selectedPloDebut,
+      selectedArreteNecessaire,
+      selectedTypeEmprise,
+      selectedPdfFilename,
+      selectedPanonceaux,
+      selectedVehicleType,
+      selectedDecisionAttachment,
+    ].filter((value) => value !== "all").length;
+  }, [
+    selectedArreteNecessaire,
+    selectedCatireveCategory,
+    selectedCote,
+    selectedDecisionAttachment,
+    selectedGammePanneau,
+    selectedPanonceaux,
+    selectedPdfFilename,
+    selectedPloDebut,
+    selectedPositionPanneau,
+    selectedRoute,
+    selectedTypeEmprise,
+    selectedTypePanneau,
+    selectedVehicleType,
+  ]);
 
   const measureDistance = useMemo(() => {
     if (measurePoints.length < 2) {
       return null;
     }
-    return measurePoints[0].latlng.distanceTo(measurePoints[1].latlng);
+    return measurePoints.slice(1).reduce((total, point, index) => {
+      return total + measurePoints[index].latlng.distanceTo(point.latlng);
+    }, 0);
   }, [measurePoints]);
 
   useEffect(() => {
@@ -917,12 +1154,11 @@ export function DashboardCeremap3D() {
         return;
       }
       const latlng = snapToPanels
-        ? getNearestSnapPoint(map, event.latlng, filteredRecords, pointOffsets)
+        ? getNearestSnapPoint(map, event.latlng, filteredPanelRecords, pointOffsets)
         : event.latlng;
 
       setMeasurePoints((current) => {
-        const next = current.length >= 2 ? [] : current;
-        return [...next, { latlng, label: createMeasureLabel(next.length) }];
+        return [...current, { latlng, label: createMeasureLabel(current.length) }];
       });
     };
 
@@ -933,7 +1169,7 @@ export function DashboardCeremap3D() {
       map.off("click", handler);
       map.getContainer().style.cursor = "";
     };
-  }, [filteredRecords, measureMode, pointOffsets, snapToPanels]);
+  }, [filteredPanelRecords, measureMode, pointOffsets, snapToPanels]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1035,6 +1271,11 @@ export function DashboardCeremap3D() {
             opacity: isSelected ? 1 : 0.72,
           },
         });
+        vitesseLayer.bindTooltip(getEmpriseTooltipContent(record), {
+          sticky: true,
+          direction: "top",
+        });
+        vitesseLayer.bindPopup(buildEmprisePopupContent(record));
         vitesseLayer.on("click", () => setSelectedRecordKey(record.key));
         dataLayer.addLayer(vitesseLayer);
       }
@@ -1048,6 +1289,11 @@ export function DashboardCeremap3D() {
             opacity: isSelected ? 1 : 0.72,
           },
         });
+        depassementLayer.bindTooltip(getEmpriseTooltipContent(record), {
+          sticky: true,
+          direction: "top",
+        });
+        depassementLayer.bindPopup(buildEmprisePopupContent(record));
         depassementLayer.on("click", () => setSelectedRecordKey(record.key));
         dataLayer.addLayer(depassementLayer);
       }
@@ -1091,7 +1337,7 @@ export function DashboardCeremap3D() {
       measureLayer.addLayer(marker);
     });
 
-    if (measurePoints.length === 2) {
+    if (measurePoints.length >= 2) {
       const line = L.polyline(measurePoints.map((point) => point.latlng), {
         color: "#101828",
         weight: 3,
@@ -1106,15 +1352,31 @@ export function DashboardCeremap3D() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !selectedRecord?.pointGeometry) {
+    if (!map || !selectedRecord) {
       return;
     }
 
-    const [lon, lat] = selectedRecord.pointGeometry.coordinates;
-    const targetLatLng =
-      pointOffsets.get(selectedRecord.key) || L.latLng(lat, lon);
+    if (selectedRecord.pointGeometry) {
+      const [lon, lat] = selectedRecord.pointGeometry.coordinates;
+      const targetLatLng =
+        pointOffsets.get(selectedRecord.key) || L.latLng(lat, lon);
+      map.panTo(targetLatLng, { animate: true, duration: 0.5 });
+      return;
+    }
 
-    map.panTo(targetLatLng, { animate: true, duration: 0.5 });
+    const selectedGeometry =
+      selectedRecord.sourceKind === "vitesse"
+        ? selectedRecord.vitesseGeometry
+        : selectedRecord.sourceKind === "depassement"
+          ? selectedRecord.depassementGeometry
+          : null;
+
+    if (selectedGeometry) {
+      const bounds = L.geoJSON(selectedGeometry as GeoJSON.GeoJsonObject).getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [26, 26] });
+      }
+    }
   }, [pointOffsets, selectedRecord]);
 
   const detailItems = useMemo(() => {
@@ -1147,321 +1409,292 @@ export function DashboardCeremap3D() {
     ];
   }, [selectedRecord]);
 
+  const toggleFilterSection = (section: FilterSectionKey) => {
+    setFilterSections((current) => ({ ...current, [section]: !current[section] }));
+  };
+
+  const resetAllFilters = () => {
+    setSelectedCatireveCategory("all");
+    setSelectedTypePanneau("all");
+    setSelectedGammePanneau("all");
+    setSelectedPositionPanneau("all");
+    setSelectedRoute("all");
+    setSelectedCote("all");
+    setSelectedPloDebut("all");
+    setSelectedArreteNecessaire("all");
+    setSelectedTypeEmprise("all");
+    setSelectedPdfFilename("all");
+    setSelectedPanonceaux("all");
+    setSelectedVehicleType("all");
+    setSelectedDecisionAttachment("all");
+    setExpandedSiteKey(null);
+    setHasAdjustedView(false);
+  };
+
+  const renderFilterSelect = (
+    label: string,
+    value: string,
+    onChange: (nextValue: string) => void,
+    options: string[],
+    allLabel: string,
+  ) => (
+    <label className={styles.filterField}>
+      <span className={styles.filterLabel}>{label}</span>
+      <select className={styles.searchInput} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="all">{allLabel}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
+  const loadingStatus = loading
+    ? "Chargement initial de la vue Ceremap3D..."
+    : isStreaming
+      ? `Chargement progressif en cours: ${loadedRows}/${totalRows ?? loadedRows} lignes.`
+      : `Chargement termine: ${loadedRows}/${totalRows ?? loadedRows} lignes.`;
+
   return (
-    <div className={`container ${styles.page}`}>
-      <div className={styles.top}>
-        <div className={styles.headerBlock}>
-          <h1 className={styles.title}>{title}</h1>
-          <p className={styles.description}>{description}</p>
-          {error ? <p className="muted">{error}</p> : null}
-        </div>
-        <button className={styles.back} onClick={() => navigate("/dashboardhome")}>
-          Retour au dashboard home
-        </button>
-      </div>
-
-      <div className={styles.filters}>
-        <div className={styles.filterRowInline}>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Categorie de panneau</span>
-            <select className={styles.searchInput} value={selectedCatireveCategory} onChange={(event) => setSelectedCatireveCategory(event.target.value)}>
-              <option value="all">Toutes</option>
-              {availableCatireveCategories.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Type de panneau</span>
-            <select className={styles.searchInput} value={selectedTypePanneau} onChange={(event) => setSelectedTypePanneau(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableTypePanneaux.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Gamme de panneau</span>
-            <select className={styles.searchInput} value={selectedGammePanneau} onChange={(event) => setSelectedGammePanneau(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableGammePanneaux.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className={styles.filterRowInline}>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Position du panneau</span>
-            <select className={styles.searchInput} value={selectedPositionPanneau} onChange={(event) => setSelectedPositionPanneau(event.target.value)}>
-              <option value="all">Tous</option>
-              {availablePositionPanneaux.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Route</span>
-            <select className={styles.searchInput} value={selectedRoute} onChange={(event) => setSelectedRoute(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableRoutes.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Cote circulee</span>
-            <select className={styles.searchInput} value={selectedCote} onChange={(event) => setSelectedCote(event.target.value)}>
-              <option value="all">Toutes</option>
-              {availableCotes.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className={styles.filterRowInline}>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>PLO de debut</span>
-            <select className={styles.searchInput} value={selectedPloDebut} onChange={(event) => setSelectedPloDebut(event.target.value)}>
-              <option value="all">Tous</option>
-              {availablePloDebuts.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Arrete necessaire</span>
-            <select className={styles.searchInput} value={selectedArreteNecessaire} onChange={(event) => setSelectedArreteNecessaire(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableArretesNecessaires.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Type d'arrete</span>
-            <select className={styles.searchInput} value={selectedTypeEmprise} onChange={(event) => setSelectedTypeEmprise(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableTypeEmprises.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className={styles.filterRowInline}>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Nom de l'arrete PDF</span>
-            <select className={styles.searchInput} value={selectedPdfFilename} onChange={(event) => setSelectedPdfFilename(event.target.value)}>
-              <option value="all">Tous</option>
-              {availablePdfFilenames.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Panneaux complementaires</span>
-            <select className={styles.searchInput} value={selectedPanonceaux} onChange={(event) => setSelectedPanonceaux(event.target.value)}>
-              <option value="all">Tous</option>
-              {availablePanonceaux.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>VL-PL</span>
-            <select className={styles.searchInput} value={selectedVehicleType} onChange={(event) => setSelectedVehicleType(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableVehicleTypes.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className={styles.filterRowInline}>
-          <div className={styles.filterBlock}>
-            <span className={styles.filterLabel}>Rattachement a un arrete</span>
-            <select className={styles.searchInput} value={selectedDecisionAttachment} onChange={(event) => setSelectedDecisionAttachment(event.target.value)}>
-              <option value="all">Tous</option>
-              {availableDecisionAttachments.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.stats}>
-        <article className={styles.stat}>
-          <span className={styles.statValue}>{loading ? "..." : filteredRecords.length}</span>
-          <div className={styles.statLabel}>panneaux visibles</div>
-        </article>
-        <article className={styles.stat}>
-          <span className={styles.statValue}>
-            {loading ? "..." : totalRows !== null ? `${loadedRows}/${totalRows}` : loadedRows}
-          </span>
-          <div className={styles.statLabel}>lignes chargees</div>
-        </article>
-        <article className={styles.stat}>
-          <span className={styles.statValue}>{loading ? "..." : vitesseCount}</span>
-          <div className={styles.statLabel}>emprises vitesse</div>
-        </article>
-        <article className={styles.stat}>
-          <span className={styles.statValue}>{loading ? "..." : depassementCount}</span>
-          <div className={styles.statLabel}>emprises depassement</div>
-        </article>
-        <article className={styles.stat}>
-          <span className={styles.statValue}>{loading ? "..." : duplicateSiteCount}</span>
-          <div className={styles.statLabel}>sites multi-panneaux</div>
-        </article>
-        <article className={styles.stat}>
-          <span className={styles.statValue}>{loading ? "..." : formatDateValue(latestUpdate)}</span>
-          <div className={styles.statLabel}>derniere mise a jour detectee</div>
-        </article>
-      </div>
-
-      <div className={`${styles.surface} ${styles.surfaceInteractive} ${fullscreenMap ? styles.surfaceInteractiveFullscreen : ""}`}>
-        <div className={`${styles.mapWrap} ${fullscreenMap ? styles.mapWrapFullscreen : ""}`}>
-          <div id="ceremap3d-map" className={`${styles.map} ${styles.mapLarge}`} />
-
-          <div className={styles.mapBadge}>
-            <span className={styles.mapBadgeLabel}>Affichage</span>
-            <div className={styles.layerGrid}>
-              <button
-                className={fullscreenMap ? styles.layerToggleActive : styles.layerToggle}
-                onClick={() => setFullscreenMap((current) => !current)}
-              >
-                {fullscreenMap ? "Quitter plein ecran" : "Carte plein ecran"}
-              </button>
+    <div className={`container ${styles.page} ${styles.pageWide}`}>
+      <div className={`${styles.workspace} ${!filtersVisible ? styles.workspaceFiltersCollapsed : ""}`}>
+        <aside className={`${styles.filterSidebar} ${!filtersVisible ? styles.filterSidebarCollapsed : ""}`}>
+          {filtersVisible ? (
+            <div className={styles.sidebarHeaderCard}>
+              <h1 className={styles.title}>{title}</h1>
+              <p className={styles.description}>{description}</p>
+              {error ? <p className="muted">{error}</p> : null}
             </div>
+          ) : null}
 
-            <span className={styles.mapBadgeLabel}>Fond de carte</span>
-            <div className={styles.layerGrid}>
-              {Object.entries(BASEMAPS).map(([key, config]) => (
-                <button
-                  key={key}
-                  className={basemap === key ? styles.layerToggleActive : styles.layerToggle}
-                  onClick={() => setBasemap(key as BasemapKey)}
-                >
-                  {config.label}
-                </button>
-              ))}
-            </div>
-
-            <span className={styles.mapBadgeLabel}>Couches</span>
-            <div className={styles.layerGrid}>
+          <div className={styles.sidebarToolbar}>
+            <button
+              className={styles.sidebarToggle}
+              onClick={() => setFiltersVisible((current) => !current)}
+              aria-expanded={filtersVisible}
+            >
+              {filtersVisible ? "Masquer les filtres" : "Ouvrir les filtres"}
+            </button>
+            {filtersVisible ? (
               <button
-                className={layerVisibility.panels ? styles.layerToggleActive : styles.layerToggle}
-                onClick={() => setLayerVisibility((current) => ({ ...current, panels: !current.panels }))}
+                className={styles.filterButton}
+                onClick={resetAllFilters}
+                disabled={activeFilterCount === 0}
               >
-                Panneaux
-              </button>
-              <button
-                className={layerVisibility.vitesse ? styles.layerToggleActive : styles.layerToggle}
-                onClick={() => setLayerVisibility((current) => ({ ...current, vitesse: !current.vitesse }))}
-              >
-                Emprise vitesse
-              </button>
-              <button
-                className={layerVisibility.depassement ? styles.layerToggleActive : styles.layerToggle}
-                onClick={() => setLayerVisibility((current) => ({ ...current, depassement: !current.depassement }))}
-              >
-                Emprise depassement
-              </button>
-              <button
-                className={layerVisibility.plo ? styles.layerToggleActive : styles.layerToggle}
-                onClick={() => setLayerVisibility((current) => ({ ...current, plo: !current.plo }))}
-                disabled={ploCount === 0}
-              >
-                PLO {ploCount > 0 ? `(${ploCount})` : "(absent)"}
-              </button>
-            </div>
-          </div>
-
-          <div className={styles.mapBadgeSecondary}>
-            <span className={styles.mapBadgeLabel}>Mesure</span>
-            <div className={styles.measureControls}>
-              <button
-                className={measureMode ? styles.filterButtonActive : styles.filterButton}
-                onClick={() => {
-                  setMeasureMode((current) => !current);
-                  setMeasurePoints([]);
-                }}
-              >
-                {measureMode ? "Desactiver" : "Activer"}
-              </button>
-              <button
-                className={snapToPanels ? styles.filterButtonActive : styles.filterButton}
-                onClick={() => setSnapToPanels((current) => !current)}
-              >
-                Aimantation
-              </button>
-              <button className={styles.filterButton} onClick={() => setMeasurePoints([])}>
                 Reinitialiser
               </button>
-            </div>
-            <div className={styles.mapBadgeMeta}>
-              {measureMode ? "Cliquez sur deux points pour mesurer la distance a vol d'oiseau." : "Mode de mesure inactif."}
-            </div>
-            <strong>{measureDistance === null ? "Aucune mesure" : formatDistance(measureDistance)}</strong>
+            ) : null}
           </div>
 
-          <div className={styles.floatingLegend}>
-            <div className={styles.floatingLegendItem}>
-              <span className={styles.floatingLegendSwatchColor} style={{ background: PANEL_COLOR }} />
-              <div className={styles.floatingLegendContent}>
-                <span className={styles.floatingLegendLabel}>Panneaux</span>
-                <strong>{filteredRecords.length} points visibles</strong>
+          {filtersVisible ? (
+            <>
+              <section className={styles.filterAccordion}>
+                <button className={styles.filterAccordionHeader} onClick={() => toggleFilterSection("affichage")}>
+                  <span>Affichage carte</span>
+                  <span>{filterSections.affichage ? "-" : "+"}</span>
+                </button>
+                {filterSections.affichage ? (
+                  <div className={styles.filterAccordionBody}>
+                    <span className={styles.filterLabel}>Fond de carte</span>
+                    <div className={styles.layerGrid}>
+                      {Object.entries(BASEMAPS).map(([key, config]) => (
+                        <button
+                          key={key}
+                          className={basemap === key ? styles.layerToggleActive : styles.layerToggle}
+                          onClick={() => setBasemap(key as BasemapKey)}
+                        >
+                          {config.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <span className={styles.filterLabel}>Couches</span>
+                    <div className={styles.layerGrid}>
+                      <button
+                        className={layerVisibility.panels ? styles.layerToggleActive : styles.layerToggle}
+                        onClick={() => setLayerVisibility((current) => ({ ...current, panels: !current.panels }))}
+                      >
+                        Panneaux
+                      </button>
+                      <button
+                        className={layerVisibility.vitesse ? styles.layerToggleActive : styles.layerToggle}
+                        onClick={() => setLayerVisibility((current) => ({ ...current, vitesse: !current.vitesse }))}
+                      >
+                        Emprise vitesse
+                      </button>
+                      <button
+                        className={layerVisibility.depassement ? styles.layerToggleActive : styles.layerToggle}
+                        onClick={() => setLayerVisibility((current) => ({ ...current, depassement: !current.depassement }))}
+                      >
+                        Emprise depassement
+                      </button>
+                      <button
+                        className={layerVisibility.plo ? styles.layerToggleActive : styles.layerToggle}
+                        onClick={() => setLayerVisibility((current) => ({ ...current, plo: !current.plo }))}
+                        disabled={ploCount === 0}
+                      >
+                        PLO {ploCount > 0 ? `(${ploCount})` : "(absent)"}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <div className={styles.sidebarSummaryGrid}>
+                <article className={styles.sidebarSummaryCard}>
+                  <span className={styles.statValue}>{loading ? "..." : filteredPanelRecords.length}</span>
+                  <span className={styles.statLabel}>panneaux visibles</span>
+                </article>
+                <article className={styles.sidebarSummaryCard}>
+                  <span className={styles.statValue}>{loading ? "..." : activeFilterCount}</span>
+                  <span className={styles.statLabel}>filtres actifs</span>
+                </article>
+                <article className={styles.sidebarSummaryCard}>
+                  <span className={styles.statValue}>{loading ? "..." : `${vitesseCount}/${depassementCount}`}</span>
+                  <span className={styles.statLabel}>vitesse / depassement</span>
+                </article>
+                <article className={styles.sidebarSummaryCard}>
+                  <span className={styles.statValue}>{loading ? "..." : duplicateSiteCount}</span>
+                  <span className={styles.statLabel}>sites multi-panneaux</span>
+                </article>
               </div>
-            </div>
-            <div className={styles.floatingLegendItem}>
-              <span className={styles.floatingLegendSwatchWidth} style={{ background: VITESSE_COLOR }} />
-              <div className={styles.floatingLegendContent}>
-                <span className={styles.floatingLegendLabel}>Emprises</span>
-                <strong>{vitesseCount} vitesse, {depassementCount} depassement</strong>
+
+              <section className={styles.filterAccordion}>
+                <button className={styles.filterAccordionHeader} onClick={() => toggleFilterSection("signalisation")}>
+                  <span>Signalisation</span>
+                  <span>{filterSections.signalisation ? "-" : "+"}</span>
+                </button>
+                {filterSections.signalisation ? (
+                  <div className={styles.filterAccordionBody}>
+                    <div className={styles.filterFieldsGrid}>
+                      {renderFilterSelect("Categorie de panneau", selectedCatireveCategory, setSelectedCatireveCategory, availableCatireveCategories, "Toutes")}
+                      {renderFilterSelect("Type de panneau", selectedTypePanneau, setSelectedTypePanneau, availableTypePanneaux, "Tous")}
+                      {renderFilterSelect("Gamme de panneau", selectedGammePanneau, setSelectedGammePanneau, availableGammePanneaux, "Toutes")}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className={styles.filterAccordion}>
+                <button className={styles.filterAccordionHeader} onClick={() => toggleFilterSection("implantation")}>
+                  <span>Implantation</span>
+                  <span>{filterSections.implantation ? "-" : "+"}</span>
+                </button>
+                {filterSections.implantation ? (
+                  <div className={styles.filterAccordionBody}>
+                    <div className={styles.filterFieldsGrid}>
+                      {renderFilterSelect("Position du panneau", selectedPositionPanneau, setSelectedPositionPanneau, availablePositionPanneaux, "Toutes")}
+                      {renderFilterSelect("Route", selectedRoute, setSelectedRoute, availableRoutes, "Toutes")}
+                      {renderFilterSelect("Cote circulee", selectedCote, setSelectedCote, availableCotes, "Toutes")}
+                      {renderFilterSelect("PLO de debut", selectedPloDebut, setSelectedPloDebut, availablePloDebuts, "Tous")}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className={styles.filterAccordion}>
+                <button className={styles.filterAccordionHeader} onClick={() => toggleFilterSection("arretes")}>
+                  <span>Arretes et rattachements</span>
+                  <span>{filterSections.arretes ? "-" : "+"}</span>
+                </button>
+                {filterSections.arretes ? (
+                  <div className={styles.filterAccordionBody}>
+                    <div className={styles.filterFieldsGrid}>
+                      {renderFilterSelect("Arrete necessaire", selectedArreteNecessaire, setSelectedArreteNecessaire, availableArretesNecessaires, "Tous")}
+                      {renderFilterSelect("Type d'arrete", selectedTypeEmprise, setSelectedTypeEmprise, availableTypeEmprises, "Tous")}
+                      {renderFilterSelect("Nom de l'arrete PDF", selectedPdfFilename, setSelectedPdfFilename, availablePdfFilenames, "Tous")}
+                      {renderFilterSelect("Panneaux complementaires", selectedPanonceaux, setSelectedPanonceaux, availablePanonceaux, "Tous")}
+                      {renderFilterSelect("VL-PL", selectedVehicleType, setSelectedVehicleType, availableVehicleTypes, "Tous")}
+                      {renderFilterSelect("Rattachement a un arrete", selectedDecisionAttachment, setSelectedDecisionAttachment, availableDecisionAttachments, "Tous")}
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+            </>
+          ) : null}
+        </aside>
+
+        <section className={styles.mapStage}>
+          <div className={`${styles.surface} ${styles.mapSurface}`}>
+            <div className={`${styles.mapWrap} ${styles.mapWrapDocked}`}>
+              {!filtersVisible ? (
+                <button className={styles.mapSidebarHandle} onClick={() => setFiltersVisible(true)}>
+                  Ouvrir les filtres
+                </button>
+              ) : null}
+
+              <div id="ceremap3d-map" className={`${styles.map} ${styles.mapLarge}`} />
+
+              <div className={styles.mapBadgeSecondary}>
+                <span className={styles.mapBadgeLabel}>Mesure</span>
+                <div className={styles.measureControls}>
+                  <button
+                    className={measureMode ? styles.filterButtonActive : styles.filterButton}
+                    onClick={() => {
+                      setMeasureMode((current) => !current);
+                      setMeasurePoints([]);
+                    }}
+                  >
+                    {measureMode ? "Desactiver" : "Activer"}
+                  </button>
+                  <button
+                    className={snapToPanels ? styles.filterButtonActive : styles.filterButton}
+                    onClick={() => setSnapToPanels((current) => !current)}
+                  >
+                    Aimantation
+                  </button>
+                  <button className={styles.filterButton} onClick={() => setMeasurePoints([])}>
+                    Reinitialiser
+                  </button>
+                </div>
+                <div className={styles.mapBadgeMeta}>
+                  {measureMode
+                    ? "Cliquez sur plusieurs points pour mesurer la distance totale a vol d'oiseau."
+                    : "Mode de mesure inactif."}
+                </div>
+                <strong>
+                  {measureDistance === null
+                    ? "Aucune mesure"
+                    : `${formatDistance(measureDistance)}${measurePoints.length > 0 ? ` · ${measurePoints.length} points` : ""}`}
+                </strong>
               </div>
-            </div>
-            <div className={styles.floatingLegendItem}>
-              <span className={styles.floatingLegendSwatchRange} />
-              <div className={styles.floatingLegendContent}>
-                <span className={styles.floatingLegendLabel}>Vue source</span>
-                <strong>{sqlViewSlug}</strong>
+
+              <div className={styles.floatingLegend}>
+                <div className={styles.floatingLegendItem}>
+                  <span className={styles.floatingLegendSwatchColor} style={{ background: PANEL_COLOR }} />
+                  <div className={styles.floatingLegendContent}>
+                    <span className={styles.floatingLegendLabel}>Panneaux</span>
+                    <strong>{filteredPanelRecords.length} points visibles</strong>
+                  </div>
+                </div>
+                <div className={styles.floatingLegendItem}>
+                  <span className={styles.floatingLegendSwatchWidth} style={{ background: VITESSE_COLOR }} />
+                  <div className={styles.floatingLegendContent}>
+                    <span className={styles.floatingLegendLabel}>Emprises</span>
+                    <strong>{vitesseCount} vitesse, {depassementCount} depassement</strong>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        <aside className={`${styles.sidePanel} ${fullscreenMap ? styles.sidePanelFullscreen : ""}`}>
-          <h3 className={styles.panelInfoTitle}>Panneau selectionne</h3>
+        <aside className={`${styles.sidePanel} ${styles.sidePanelDocked}`}>
+          <div className={styles.sidePanelHeader}>
+            <div className={styles.headerInfoCard}>
+              <span className={styles.filterLabel}>Etat du chargement</span>
+              <strong>{loading ? "Initialisation" : isStreaming ? "Streaming" : "Pret"}</strong>
+              <span className={styles.mutedSmall}>{loadingStatus}</span>
+            </div>
+            <button className={styles.back} onClick={() => navigate("/dashboardhome")}>
+              Retour au dashboard home
+            </button>
+          </div>
+
+          <h3 className={styles.panelInfoTitle}>{selectedRecord?.sourceKind === "panel" ? "Panneau selectionne" : "Objet selectionne"}</h3>
           {selectedRecord ? (
             <>
               <div className={styles.selectedSummary}>
@@ -1479,7 +1712,7 @@ export function DashboardCeremap3D() {
               </dl>
             </>
           ) : (
-            <p className={styles.mutedSmall}>Aucun panneau visible avec les filtres actifs.</p>
+            <p className={styles.mutedSmall}>Aucun objet visible avec les filtres actifs.</p>
           )}
 
           {recordsAtSameSite.length > 1 ? (
@@ -1522,7 +1755,7 @@ export function DashboardCeremap3D() {
 
           <h3 className={styles.panelInfoTitle}>Liste rapide</h3>
           <div className={styles.contentList}>
-            {filteredRecords.slice(0, 80).map((record) => (
+            {filteredPanelRecords.slice(0, 80).map((record) => (
               <button
                 key={record.key}
                 className={record.key === selectedRecord?.key ? styles.contentRowActive : styles.contentRow}
@@ -1533,24 +1766,23 @@ export function DashboardCeremap3D() {
                 <span>{record.route}</span>
               </button>
             ))}
-            {filteredRecords.length > 80 ? (
-              <p className={styles.mutedSmall}>+ {filteredRecords.length - 80} panneaux supplementaires</p>
+            {filteredPanelRecords.length > 80 ? (
+              <p className={styles.mutedSmall}>+ {filteredPanelRecords.length - 80} panneaux supplementaires</p>
             ) : null}
           </div>
         </aside>
       </div>
 
-      <p className={styles.footerHint}>
-        Couches disponibles: panneaux, emprises vitesse, emprises depassement
-        {ploCount > 0 ? `, PLO (${ploCount})` : ". Aucun objet PLO exploitable n'a ete detecte dans cette vue."}
-      </p>
-      <p className={styles.footerHint}>
-        {loading
-          ? "Chargement initial de la vue Ceremap3D..."
-          : isStreaming
-            ? `Chargement progressif en cours: ${loadedRows}/${totalRows ?? loadedRows} lignes.`
-            : `Chargement termine: ${loadedRows}/${totalRows ?? loadedRows} lignes.`}
-      </p>
+      <div className={styles.footerNotes}>
+        <p className={styles.footerHint}>
+          Couches disponibles: panneaux, emprises vitesse, emprises depassement
+          {ploCount > 0 ? `, PLO (${ploCount})` : ". Aucun objet PLO exploitable n'a ete detecte dans cette vue."}
+        </p>
+        <p className={styles.footerHint}>
+          {loadingStatus}
+          {!loading && latestUpdate ? ` Derniere mise a jour detectee: ${formatDateValue(latestUpdate)}.` : ""}
+        </p>
+      </div>
     </div>
   );
 }

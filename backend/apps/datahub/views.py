@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 
+from django.conf import settings
 from django.db import connection
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
+from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Dashboard, EntityTable, SqlView
-from .security import user_environment_ids
+from .media_storage import build_internal_media_url, resolve_storage_path, store_uploaded_file
+from .models import Dashboard, EntityTable, Environment, MediaAsset, SqlView
+from .security import user_environment_ids, user_is_global_admin
 
 
 def _q(name: str) -> str:
@@ -37,6 +43,54 @@ def _can_access_sql_view(*, user, sql_view: SqlView) -> bool:
     if not view_env_ids:
         return True
     return bool(env_ids.intersection(view_env_ids))
+
+
+def _can_access_dashboard(*, user, dashboard: Dashboard) -> bool:
+    env_ids = user_environment_ids(user)
+    dashboard_env_ids = set(dashboard.environments.values_list("id", flat=True))
+    if dashboard.is_protected and dashboard_env_ids and not env_ids.intersection(dashboard_env_ids):
+        return False
+    return True
+
+
+def _can_access_media_asset(*, user, asset: MediaAsset) -> bool:
+    if asset.is_public:
+        return True
+    if user_is_global_admin(user):
+        return True
+    if not getattr(user, "is_authenticated", False):
+        return False
+
+    env_ids = user_environment_ids(user)
+    asset_env_ids = set(asset.environments.values_list("id", flat=True))
+    if asset_env_ids:
+        return bool(env_ids.intersection(asset_env_ids))
+
+    if asset.dashboard_id and asset.dashboard:
+        return _can_access_dashboard(user=user, dashboard=asset.dashboard)
+
+    return False
+
+
+def _serialize_media_asset(asset: MediaAsset) -> dict:
+    return {
+        "id": asset.id,
+        "dashboard_slug": asset.dashboard.slug if asset.dashboard_id and asset.dashboard else None,
+        "entity_type": asset.entity_type,
+        "entity_id": asset.entity_id,
+        "category": asset.category,
+        "title": asset.title,
+        "description": asset.description,
+        "original_name": asset.original_name,
+        "mime_type": asset.mime_type,
+        "size_bytes": asset.size_bytes,
+        "checksum_sha256": asset.checksum_sha256,
+        "is_public": asset.is_public,
+        "file_url": f"/api/v1/datahub/media-assets/{asset.id}/file/",
+        "created_at": asset.created_at,
+        "updated_at": asset.updated_at,
+        "environments": list(asset.environments.values_list("slug", flat=True)),
+    }
 
 
 class EntityTableListView(APIView):
@@ -253,6 +307,149 @@ class SqlViewRowsView(APIView):
                 "items": rows,
             }
         )
+
+
+class MediaAssetListView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        qs = MediaAsset.objects.select_related("dashboard", "uploaded_by").prefetch_related("environments").order_by("id")
+
+        dashboard_slug = (request.query_params.get("dashboard_slug") or "").strip()
+        entity_type = (request.query_params.get("entity_type") or "").strip()
+        entity_id = (request.query_params.get("entity_id") or "").strip()
+        category = (request.query_params.get("category") or "").strip()
+
+        if dashboard_slug:
+            qs = qs.filter(dashboard__slug=dashboard_slug)
+        if entity_type:
+            qs = qs.filter(entity_type=entity_type)
+        if entity_id:
+            qs = qs.filter(entity_id=entity_id)
+        if category:
+            qs = qs.filter(category=category)
+
+        items = [_serialize_media_asset(asset) for asset in qs if _can_access_media_asset(user=request.user, asset=asset)]
+        return Response({"total_items": len(items), "items": items})
+
+    def post(self, request):
+        uploaded_file = request.FILES.get("file")
+        if uploaded_file is None:
+            return Response({"detail": "File is required."}, status=status.HTTP_400_BAD_REQUEST)
+        max_size = int(getattr(settings, "MEDIA_UPLOAD_MAX_BYTES", 104857600))
+        if uploaded_file.size > max_size:
+            return Response({"detail": f"File too large. Maximum size is {max_size} bytes."}, status=status.HTTP_400_BAD_REQUEST)
+
+        dashboard_slug = (request.data.get("dashboard_slug") or "").strip()
+        dashboard = None
+        if dashboard_slug:
+            dashboard = get_object_or_404(Dashboard.objects.prefetch_related("environments"), slug=dashboard_slug, is_active=True)
+            if not _can_access_dashboard(user=request.user, dashboard=dashboard):
+                return Response({"detail": "Access denied for dashboard."}, status=status.HTTP_403_FORBIDDEN)
+
+        entity_type = str(request.data.get("entity_type") or "").strip()
+        entity_id = str(request.data.get("entity_id") or "").strip()
+        category = str(request.data.get("category") or MediaAsset.Category.OTHER).strip()
+        if category not in MediaAsset.Category.values:
+            return Response({"detail": "Invalid category."}, status=status.HTTP_400_BAD_REQUEST)
+
+        environment_ids = request.data.getlist("environment_ids")
+        environments = []
+        if environment_ids:
+            try:
+                env_ids = [int(value) for value in environment_ids if str(value).strip()]
+            except ValueError:
+                return Response({"detail": "Invalid environment_ids."}, status=status.HTTP_400_BAD_REQUEST)
+            allowed_env_ids = user_environment_ids(request.user)
+            environments = list(Environment.objects.filter(id__in=env_ids))
+            if len(environments) != len(set(env_ids)):
+                return Response({"detail": "One or more environments do not exist."}, status=status.HTTP_400_BAD_REQUEST)
+            if not all(env.id in allowed_env_ids for env in environments):
+                return Response({"detail": "Access denied for selected environments."}, status=status.HTTP_403_FORBIDDEN)
+            if dashboard:
+                dashboard_env_ids = set(dashboard.environments.values_list("id", flat=True))
+                if dashboard_env_ids and not all(env.id in dashboard_env_ids for env in environments):
+                    return Response(
+                        {"detail": "Selected environments must belong to the target dashboard."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+        stored = store_uploaded_file(
+            uploaded_file,
+            dashboard_slug=dashboard.slug if dashboard else "global",
+            entity_type=entity_type or "asset",
+            entity_id=entity_id or "",
+        )
+        asset = MediaAsset.objects.create(
+            dashboard=dashboard,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            category=category,
+            title=str(request.data.get("title") or "").strip(),
+            description=str(request.data.get("description") or "").strip(),
+            storage_key=str(stored["storage_key"]),
+            original_name=str(stored["original_name"]),
+            mime_type=str(stored["mime_type"]),
+            size_bytes=int(stored["size_bytes"]),
+            checksum_sha256=str(stored["checksum_sha256"]),
+            is_public=str(request.data.get("is_public") or "").strip().lower() in {"1", "true", "yes", "oui"},
+            uploaded_by=request.user,
+        )
+        if environments:
+            asset.environments.set(environments)
+        elif dashboard:
+            asset.environments.set(dashboard.environments.all())
+
+        return Response(_serialize_media_asset(asset), status=status.HTTP_201_CREATED)
+
+
+class MediaAssetDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, asset_id: int):
+        asset = get_object_or_404(
+            MediaAsset.objects.select_related("dashboard", "uploaded_by").prefetch_related("environments"),
+            id=asset_id,
+        )
+        if not _can_access_media_asset(user=request.user, asset=asset):
+            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+        return Response(_serialize_media_asset(asset))
+
+
+class MediaAssetFileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, asset_id: int):
+        asset = get_object_or_404(
+            MediaAsset.objects.select_related("dashboard").prefetch_related("environments"),
+            id=asset_id,
+        )
+        if not _can_access_media_asset(user=request.user, asset=asset):
+            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            path = resolve_storage_path(asset.storage_key)
+        except ValueError as exc:
+            raise Http404(str(exc)) from exc
+        if not path.exists() or not path.is_file():
+            raise Http404("Media file not found.")
+
+        as_attachment = (request.query_params.get("download") or "").strip().lower() in {"1", "true", "yes"}
+        internal_redirect = getattr(settings, "MEDIA_INTERNAL_URL_PREFIX", "/protected-media/")
+        if internal_redirect:
+            response = HttpResponse()
+            response["Content-Type"] = asset.mime_type or "application/octet-stream"
+            response["Content-Length"] = str(asset.size_bytes)
+            disposition = "attachment" if as_attachment else "inline"
+            response["Content-Disposition"] = f'{disposition}; filename="{os.path.basename(asset.original_name)}"'
+            response["X-Accel-Redirect"] = build_internal_media_url(asset.storage_key)
+            return response
+
+        response = FileResponse(path.open("rb"), content_type=asset.mime_type or "application/octet-stream")
+        if as_attachment:
+            response["Content-Disposition"] = f'attachment; filename="{os.path.basename(asset.original_name)}"'
+        return response
 
 
 class DashboardListView(APIView):

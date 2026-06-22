@@ -45,6 +45,28 @@ Infra health endpoint:
 - `POST /api/v1/accounts/logout/`
 - `GET /api/v1/accounts/me/`
 
+## Media storage service
+- Media files are stored on disk under `MEDIA_STORAGE_ROOT`.
+- Access is brokered by Django through `/api/v1/datahub/media-assets/`.
+- For production, prefer protected Nginx serving with:
+  - `MEDIA_STORAGE_ROOT=/srv/vitrine-media`
+  - `MEDIA_INTERNAL_URL_PREFIX=/protected-media/`
+- For local dev, set `MEDIA_INTERNAL_URL_PREFIX=` to let Django stream files directly.
+
+Main endpoints:
+- `GET /api/v1/datahub/media-assets/?dashboard_slug=<slug>&entity_type=<type>&entity_id=<id>`
+- `POST /api/v1/datahub/media-assets/` with multipart field `file`
+- `GET /api/v1/datahub/media-assets/<id>/`
+- `GET /api/v1/datahub/media-assets/<id>/file/`
+
+Suggested Nginx block:
+```nginx
+location /protected-media/ {
+    internal;
+    alias /srv/vitrine-media/;
+}
+```
+
 ## Data Hub ingestion
 - Entity ingestion is now handled by `apps/datahub`.
 - One entity type is mapped to one physical table.

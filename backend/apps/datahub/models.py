@@ -142,6 +142,61 @@ class Dashboard(models.Model):
         return self.slug
 
 
+class MediaAsset(models.Model):
+    class Category(models.TextChoices):
+        PHOTO = "photo", "Photo"
+        VIDEO = "video", "Video"
+        DOCUMENT = "document", "Document"
+        CSV = "csv", "CSV"
+        SYMBOLOGY = "symbology", "Symbology"
+        OTHER = "other", "Other"
+
+    dashboard = models.ForeignKey(
+        Dashboard,
+        on_delete=models.CASCADE,
+        related_name="media_assets",
+        null=True,
+        blank=True,
+    )
+    environments = models.ManyToManyField(
+        Environment,
+        related_name="media_assets",
+        blank=True,
+    )
+    entity_type = models.CharField(max_length=120, blank=True)
+    entity_id = models.CharField(max_length=255, blank=True)
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
+    title = models.CharField(max_length=180, blank=True)
+    description = models.TextField(blank=True)
+    storage_key = models.CharField(max_length=500, unique=True)
+    original_name = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=150, blank=True)
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    checksum_sha256 = models.CharField(max_length=64, blank=True)
+    is_public = models.BooleanField(default=False)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="uploaded_media_assets",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["dashboard__slug", "entity_type", "category", "id"]
+        indexes = [
+            models.Index(fields=["dashboard", "entity_type", "entity_id", "category"]),
+            models.Index(fields=["entity_type", "entity_id"]),
+            models.Index(fields=["category"]),
+        ]
+
+    def __str__(self) -> str:
+        dashboard_slug = self.dashboard.slug if self.dashboard_id and self.dashboard else "global"
+        return f"{dashboard_slug}:{self.category}:{self.original_name}"
+
+
 class ImportRun(models.Model):
     class Mode(models.TextChoices):
         UPSERT = "upsert", "Upsert"
