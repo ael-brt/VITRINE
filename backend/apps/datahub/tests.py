@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 import shutil
 import tempfile
 
-from .media_storage import resolve_storage_path
+from .media_storage import normalize_referenced_media_path, resolve_referenced_media_path, resolve_storage_path
 from .models import Dashboard, EntityTable, Environment, EnvironmentAccessGroup, MediaAsset, Tenant
 from .models import SqlView
 from .sql_views import deploy_sql_view
@@ -207,4 +207,80 @@ class MediaAssetApiTests(TestCase):
         denied_client = APIClient()
         denied_client.force_authenticate(user=self.other_user)
         response = denied_client.get(reverse("datahub-media-asset-detail", args=[asset.id]))
+        self.assertEqual(response.status_code, 403)
+
+
+@override_settings(
+    CEREMAP3D_IMAGE_ROOT=tempfile.mkdtemp(prefix="vitrine-ceremap3d-images-"),
+    CEREMAP3D_IMAGE_INTERNAL_URL_PREFIX="",
+)
+class Ceremap3DReferencedImageTests(TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        image_root = getattr(settings, "CEREMAP3D_IMAGE_ROOT", "")
+        if image_root:
+            shutil.rmtree(image_root, ignore_errors=True)
+        super().tearDownClass()
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="ceremap-user",
+            email="ceremap@example.com",
+            password="demo-pass",
+        )
+        self.other_user = user_model.objects.create_user(
+            username="ceremap-other",
+            email="ceremap-other@example.com",
+            password="demo-pass",
+        )
+        self.environment = Environment.objects.create(slug="env-ceremap", name="Env Ceremap")
+        self.group = EnvironmentAccessGroup.objects.create(name="Ceremap readers")
+        self.group.users.add(self.user)
+        self.group.environments.add(self.environment)
+        self.dashboard = Dashboard.objects.create(
+            slug="ceremap3d",
+            title="Ceremap3D",
+            is_protected=True,
+        )
+        self.dashboard.environments.add(self.environment)
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_normalize_referenced_media_path(self):
+        self.assertEqual(
+            normalize_referenced_media_path('../../photos/panneaux/test.jpg'),
+            "photos/panneaux/test.jpg",
+        )
+        self.assertEqual(
+            normalize_referenced_media_path('["../../photos/panneaux/test.jpg"]'),
+            "photos/panneaux/test.jpg",
+        )
+        self.assertEqual(
+            normalize_referenced_media_path("../../../../etc/passwd"),
+            "etc/passwd",
+        )
+
+    def test_ceremap3d_image_endpoint_serves_referenced_file(self):
+        relative_path, file_path = resolve_referenced_media_path(
+            settings.CEREMAP3D_IMAGE_ROOT,
+            "../../photos/panneaux/panneau-1.jpg",
+        )
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(b"panel-image")
+
+        response = self.client.get(
+            reverse("datahub-ceremap3d-panel-image"),
+            {"path": relative_path},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"panel-image")
+
+    def test_ceremap3d_image_endpoint_denies_unauthorized_user(self):
+        denied_client = APIClient()
+        denied_client.force_authenticate(user=self.other_user)
+        response = denied_client.get(
+            reverse("datahub-ceremap3d-panel-image"),
+            {"path": "photos/panneaux/panneau-1.jpg"},
+        )
         self.assertEqual(response.status_code, 403)

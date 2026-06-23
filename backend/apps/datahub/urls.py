@@ -3,6 +3,8 @@ from django.urls import path
 from .views import (
     DashboardDetailView,
     DashboardListView,
+    Ceremap3DPanelImageView,
+    Ceremap3DCategorySymbolView,
     EntityTableListView,
     EntityTableRowsByNameView,
     EntityTableSearchView,
@@ -21,6 +23,8 @@ urlpatterns = [
     path("sqlviews/", SqlViewListView.as_view(), name="datahub-sqlviews"),
     path("sqlviews/<slug:slug>/rows/", SqlViewRowsView.as_view(), name="datahub-sqlview-rows"),
     path("sqlviews/<slug:slug>/geojson/", SqlViewGeoJsonView.as_view(), name="datahub-sqlview-geojson"),
+    path("ceremap3d/panel-image/", Ceremap3DPanelImageView.as_view(), name="datahub-ceremap3d-panel-image"),
+    path("ceremap3d/category-symbol/", Ceremap3DCategorySymbolView.as_view(), name="datahub-ceremap3d-category-symbol"),
     path("media-assets/", MediaAssetListView.as_view(), name="datahub-media-assets"),
     path("media-assets/<int:asset_id>/", MediaAssetDetailView.as_view(), name="datahub-media-asset-detail"),
     path("media-assets/<int:asset_id>/file/", MediaAssetFileView.as_view(), name="datahub-media-asset-file"),

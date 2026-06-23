@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha1, sha256
+import json
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 import mimetypes
@@ -103,3 +104,65 @@ def build_internal_media_url(storage_key: str) -> str:
         prefix = f"/{prefix}"
     prefix = prefix.rstrip("/") + "/"
     return f"{prefix}{normalized}"
+
+
+def normalize_referenced_media_path(raw_value: object) -> str | None:
+    if raw_value is None:
+        return None
+
+    candidate: object = raw_value
+    if isinstance(candidate, (list, tuple)):
+        candidate = candidate[0] if candidate else None
+    elif not isinstance(candidate, str):
+        candidate = str(candidate)
+
+    if not candidate:
+        return None
+
+    value = str(candidate).strip()
+    if not value or value.lower() in {"none", "null", "undefined"}:
+        return None
+
+    if value.startswith("[") and value.endswith("]"):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list) and parsed:
+                value = str(parsed[0]).strip()
+            else:
+                value = value[1:-1].split(",", 1)[0].strip()
+        except Exception:
+            value = value[1:-1].split(",", 1)[0].strip()
+
+    value = value.strip("\"'")
+    value = value.replace("\\", "/")
+    while value.startswith("../"):
+        value = value[3:]
+    value = value.lstrip("./").lstrip("/")
+
+    normalized = PurePosixPath(value)
+    if ".." in normalized.parts or normalized.as_posix() in {"", "."}:
+        return None
+    return normalized.as_posix()
+
+
+def resolve_referenced_media_path(root_path: str | Path, raw_value: object) -> tuple[str, Path]:
+    relative_path = normalize_referenced_media_path(raw_value)
+    if not relative_path:
+        raise ValueError("Invalid referenced media path.")
+
+    root = Path(root_path).resolve()
+    path = (root / relative_path).resolve()
+    if root != path and root not in path.parents:
+        raise ValueError("Resolved referenced media path escapes configured root.")
+    return relative_path, path
+
+
+def build_internal_file_url(relative_path: str, prefix: str) -> str:
+    normalized = normalize_referenced_media_path(relative_path)
+    if not normalized:
+        raise ValueError("Invalid relative path.")
+    clean_prefix = (prefix or "").strip()
+    if not clean_prefix.startswith("/"):
+        clean_prefix = f"/{clean_prefix}"
+    clean_prefix = clean_prefix.rstrip("/") + "/"
+    return f"{clean_prefix}{normalized}"

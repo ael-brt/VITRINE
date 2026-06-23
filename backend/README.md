@@ -59,6 +59,18 @@ Main endpoints:
 - `GET /api/v1/datahub/media-assets/<id>/`
 - `GET /api/v1/datahub/media-assets/<id>/file/`
 
+### Ceremap3D referenced images
+- Use this mode when panel rows already contain a relative image path (`first_image_path`, `imgpath`, etc.).
+- Drop the whole image tree under `CEREMAP3D_IMAGE_ROOT`.
+- Backend resolves the referenced path safely and serves the file through:
+- `GET /api/v1/datahub/ceremap3d/panel-image/?entity_id=<urn:...>`
+- `GET /api/v1/datahub/ceremap3d/category-symbol/?category=<A-DANGER>`
+- Optional direct debug path:
+  - `GET /api/v1/datahub/ceremap3d/panel-image/?path=<relative/path.jpg>`
+- For local dev, set:
+  - `CEREMAP3D_IMAGE_INTERNAL_URL_PREFIX=`
+- For protected Nginx serving, point it to a dedicated internal location mapped to `CEREMAP3D_IMAGE_ROOT`.
+
 Suggested Nginx block:
 ```nginx
 location /protected-media/ {

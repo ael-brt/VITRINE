@@ -8,6 +8,7 @@ import styles from "./Dashboard.module.css";
 const DEFAULT_TITLE = "Dashboard ceremap3d";
 const DEFAULT_DESCRIPTION =
   "Grande carte multicouches pour explorer les panneaux, les emprises et les informations associees issues de Ceremap3D.";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL?.trim() || "/api/v1").replace(/\/+$/, "");
 
 const SQL_VIEW_SLUG_CANDIDATES = Array.from(
   new Set(
@@ -26,10 +27,10 @@ const MEDIA_BASE_URL = (
 ).replace(/\/+$/, "");
 
 const PANEL_COLOR = "#1f78ff";
-const PANEL_ACTIVE_COLOR = "#ef7d00";
 const VITESSE_COLOR = "#2f8f6a";
 const DEPASSEMENT_COLOR = "#cc355f";
 const PLO_COLOR = "#7a4cff";
+const PANEL_CATEGORY_COLORS = ["#1f78ff", "#ef7d00", "#2f8f6a", "#cc355f", "#7a4cff", "#0f766e", "#b45309", "#7c3aed"];
 const EMPTY_FEATURES: DashboardFeature[] = [];
 const STACK_RADIUS_DEGREES = 0.00016;
 const SQL_VIEW_PAGE_SIZE = 200;
@@ -126,6 +127,15 @@ type FilterKey =
   | "decisionAttachment";
 
 type FilterState = Record<FilterKey, string>;
+type PanelCategoryIconKind = "interdiction" | "obligation" | "danger" | "indication" | "service" | "direction" | "temporary" | "generic";
+type PanelCategoryStyle = {
+  key: string;
+  label: string;
+  color: string;
+  iconKind: PanelCategoryIconKind;
+  emoji: string;
+  symbolUrl: string | null;
+};
 
 function isFeatureProperties(value: unknown): value is FeatureProperties {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -270,18 +280,19 @@ function formatSize(value: number | null): string {
   return value === null ? "N/A" : `${value.toFixed(2)} m`;
 }
 
-function resolveImageUrl(path: string | null): string | null {
-  if (!path) {
+function resolveImageUrl(entityId: string, path: string | null): string | null {
+  if (!entityId || !path) {
     return null;
   }
   if (/^(https?:|data:|blob:)/i.test(path)) {
     return path;
   }
-  if (path.startsWith("/")) {
-    return path;
+  const normalized = path.replace(/^(\.\.\/)+/, "").replace(/^\/+/, "").replace(/\\/g, "/");
+  if (MEDIA_BASE_URL) {
+    return `${MEDIA_BASE_URL}/${normalized}`;
   }
-  const normalized = path.replace(/^(\.\.\/)+/, "").replace(/^\/+/, "");
-  return MEDIA_BASE_URL ? `${MEDIA_BASE_URL}/${normalized}` : normalized;
+  const searchParams = new URLSearchParams({ entity_id: entityId });
+  return `${API_BASE_URL}/datahub/ceremap3d/panel-image/?${searchParams.toString()}`;
 }
 
 function getFeatureKey(feature: DashboardFeature): string {
@@ -419,7 +430,7 @@ function mapFeatureToRecord(feature: DashboardFeature): CeremapRecord {
     largeur: toNumberValue(findPropertyValue(properties, ["largeur"])),
     hauteur: toNumberValue(findPropertyValue(properties, ["hauteur"])),
     firstImagePath,
-    imageUrl: resolveImageUrl(firstImagePath),
+    imageUrl: sourceKind === "panel" ? resolveImageUrl(entityId, firstImagePath) : null,
     vehicleType: getStringValue(findPropertyValue(properties, ["type_vehicule_emprise"])) || "N/A",
     absPrNegD: getStringValue(findPropertyValue(properties, ["absPrNegD"])) || "N/A",
     absPrPosD: getStringValue(findPropertyValue(properties, ["absPrPosD"])) || "N/A",
@@ -566,6 +577,99 @@ function matchesRecordFilters(record: CeremapRecord, filters: FilterState, exclu
     return false;
   }
   return true;
+}
+
+function getPanelCategoryKey(record: CeremapRecord): string {
+  return record.catireveCategory !== "N/A" ? record.catireveCategory : record.category;
+}
+
+function inferPanelCategoryEmoji(iconKind: PanelCategoryIconKind): string {
+  switch (iconKind) {
+    case "interdiction":
+      return "⛔";
+    case "obligation":
+      return "🔵";
+    case "danger":
+      return "⚠️";
+    case "indication":
+      return "ℹ️";
+    case "service":
+      return "🅿️";
+    case "direction":
+      return "➡️";
+    case "temporary":
+      return "🚧";
+    default:
+      return "📍";
+  }
+}
+
+function resolveCategorySymbolUrl(category: string): string | null {
+  if (!category || category === "N/A") {
+    return null;
+  }
+  const searchParams = new URLSearchParams({ category });
+  return `${API_BASE_URL}/datahub/ceremap3d/category-symbol/?${searchParams.toString()}`;
+}
+
+function inferPanelCategoryIconKind(label: string): PanelCategoryIconKind {
+  const normalized = normalizeKey(label);
+  const explicitMappings: Array<{ match: string[]; iconKind: PanelCategoryIconKind }> = [
+    { match: ["signauxdinterdiction", "interdiction", "prohibition"], iconKind: "interdiction" },
+    { match: ["signauxdobligation", "obligation"], iconKind: "obligation" },
+    { match: ["signauxdedanger", "danger"], iconKind: "danger" },
+    { match: ["signauxdindication", "indication"], iconKind: "indication" },
+    { match: ["signalisationdedirection", "direction", "jalonnement", "localisation"], iconKind: "direction" },
+    { match: ["signauxdeservice", "service"], iconKind: "service" },
+    { match: ["temporaire", "chantier", "travaux"], iconKind: "temporary" },
+    { match: ["priorite", "priorité"], iconKind: "danger" },
+  ];
+
+  for (const entry of explicitMappings) {
+    if (entry.match.some((item) => normalized.includes(normalizeKey(item)))) {
+      return entry.iconKind;
+    }
+  }
+
+  if (normalized.includes("interdiction")) {
+    return "interdiction";
+  }
+  if (normalized.includes("obligation")) {
+    return "obligation";
+  }
+  if (normalized.includes("danger")) {
+    return "danger";
+  }
+  if (normalized.includes("indication")) {
+    return "indication";
+  }
+  if (normalized.includes("service")) {
+    return "service";
+  }
+  if (normalized.includes("direction")) {
+    return "direction";
+  }
+  if (normalized.includes("temporaire") || normalized.includes("chantier")) {
+    return "temporary";
+  }
+  return "generic";
+}
+
+function buildPanelMarkerHtml(style: PanelCategoryStyle, options: { selected: boolean; count?: number }): string {
+  const classes = [styles.mapSymbolMarker];
+  if (options.selected) {
+    classes.push(styles.mapSymbolMarkerActive);
+  }
+  return `
+    <span class="${classes.join(" ")}" style="--marker-color:${style.color};">
+      ${
+        style.symbolUrl
+          ? `<img class="${styles.mapSymbolImage}" src="${style.symbolUrl}" alt="${style.label}" />`
+          : `<span class="${styles.mapSymbolEmoji}">${style.emoji}</span>`
+      }
+      ${options.count && options.count > 1 ? `<span class="${styles.mapSymbolCount}">${options.count}</span>` : ""}
+    </span>
+  `;
 }
 
 function getNearestSnapPoint(map: L.Map, clickLatLng: L.LatLng, records: CeremapRecord[], pointOffsets: Map<string, L.LatLng>): L.LatLng {
@@ -892,7 +996,32 @@ export function DashboardCeremap3D() {
   const availablePanonceaux = useMemo(() => getFilterOptions(optionSourceRecords.panonceaux, (record) => record.panonceaux), [optionSourceRecords]);
   const availableVehicleTypes = useMemo(() => getFilterOptions(optionSourceRecords.vehicleType, (record) => record.vehicleType), [optionSourceRecords]);
   const availableDecisionAttachments = useMemo(() => getFilterOptions(optionSourceRecords.decisionAttachment, (record) => record.hasDecisionLabel), [optionSourceRecords]);
+  const panelCategoryStyles = useMemo(() => {
+    const categories = Array.from(
+      new Set(
+        allPanelRecords
+          .map((record) => getPanelCategoryKey(record))
+          .filter((value) => value && value !== "N/A"),
+      ),
+    ).sort((left, right) => left.localeCompare(right, "fr"));
 
+    const entries: Array<[string, PanelCategoryStyle]> = categories.map((label, index) => [
+      label,
+      (() => {
+        const iconKind = inferPanelCategoryIconKind(label);
+        return {
+          key: label,
+          label,
+          color: PANEL_CATEGORY_COLORS[index % PANEL_CATEGORY_COLORS.length],
+          iconKind,
+          emoji: inferPanelCategoryEmoji(iconKind),
+          symbolUrl: resolveCategorySymbolUrl(label),
+        };
+      })(),
+    ]);
+
+    return new Map<string, PanelCategoryStyle>(entries);
+  }, [allPanelRecords]);
   const filteredRecords = useMemo(() => {
     return allRecords.filter((record) => matchesRecordFilters(record, filterState));
   }, [allRecords, filterState]);
@@ -900,6 +1029,30 @@ export function DashboardCeremap3D() {
     () => filteredRecords.filter((record) => record.sourceKind === "panel"),
     [filteredRecords],
   );
+  const visiblePanelCategoryStyles = useMemo(() => {
+    const counts = new Map<string, number>();
+    filteredPanelRecords.forEach((record) => {
+      const key = getPanelCategoryKey(record);
+      if (!key || key === "N/A") {
+        return;
+      }
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+
+    return Array.from(counts.entries())
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "fr"))
+      .map(([key, count]) => ({
+        style: panelCategoryStyles.get(key) ?? {
+          key,
+          label: key,
+          color: PANEL_COLOR,
+          iconKind: inferPanelCategoryIconKind(key),
+          emoji: inferPanelCategoryEmoji(inferPanelCategoryIconKind(key)),
+          symbolUrl: resolveCategorySymbolUrl(key),
+        },
+        count,
+      }));
+  }, [filteredPanelRecords, panelCategoryStyles]);
 
   useEffect(() => {
     if (selectedCatireveCategory !== "all" && !availableCatireveCategories.includes(selectedCatireveCategory)) {
@@ -1198,14 +1351,34 @@ export function DashboardCeremap3D() {
             selectedRecord && visibleGroupRecords.some((record) => record.key === selectedRecord.key)
               ? selectedRecord
               : visibleGroupRecords[0];
-          const markerColor = representative.isPlo ? PLO_COLOR : PANEL_COLOR;
-          const marker = L.circleMarker(group.baseLatLng, {
-            radius: visibleGroupRecords.length > 1 ? 11 : 8,
-            fillColor: representative.key === selectedRecord?.key ? PANEL_ACTIVE_COLOR : markerColor,
-            color: "#ffffff",
-            weight: 2,
-            opacity: 1,
-            fillOpacity: 0.94,
+          const categoryKey = getPanelCategoryKey(representative);
+          const distinctCategories = new Set(
+            visibleGroupRecords
+              .map((record) => getPanelCategoryKey(record))
+              .filter((value) => value && value !== "N/A"),
+          );
+          const categoryStyle: PanelCategoryStyle = representative.isPlo
+            ? { key: "plo", label: "PLO", color: PLO_COLOR, iconKind: "service", emoji: "📮", symbolUrl: null }
+            : distinctCategories.size > 1
+              ? { key: "multi", label: "Multi-categories", color: PANEL_COLOR, iconKind: "generic", emoji: "🧩", symbolUrl: null }
+              : (panelCategoryStyles.get(categoryKey) ?? {
+                  key: categoryKey,
+                  label: categoryKey,
+                  color: PANEL_COLOR,
+                  iconKind: inferPanelCategoryIconKind(categoryKey),
+                  emoji: inferPanelCategoryEmoji(inferPanelCategoryIconKind(categoryKey)),
+                  symbolUrl: resolveCategorySymbolUrl(categoryKey),
+                });
+          const marker = L.marker(group.baseLatLng, {
+            icon: L.divIcon({
+              className: styles.mapSymbolMarkerWrap,
+              html: buildPanelMarkerHtml(categoryStyle, {
+                selected: representative.key === selectedRecord?.key,
+                count: visibleGroupRecords.length > 1 ? visibleGroupRecords.length : undefined,
+              }),
+              iconSize: [visibleGroupRecords.length > 1 ? 38 : 30, visibleGroupRecords.length > 1 ? 38 : 30],
+              iconAnchor: [visibleGroupRecords.length > 1 ? 19 : 15, visibleGroupRecords.length > 1 ? 19 : 15],
+            }),
           });
           const tooltipText =
             visibleGroupRecords.length > 1
@@ -1222,30 +1395,28 @@ export function DashboardCeremap3D() {
           });
           dataLayer.addLayer(marker);
 
-          if (visibleGroupRecords.length > 1) {
-            const countLabel = L.marker(group.baseLatLng, {
-              interactive: false,
-              icon: L.divIcon({
-                className: styles.mapCountBadge,
-                html: `<span>${visibleGroupRecords.length}</span>`,
-                iconSize: [28, 28],
-                iconAnchor: [14, 14],
-              }),
-            });
-            dataLayer.addLayer(countLabel);
-          }
         } else {
           visibleGroupRecords.forEach((record) => {
             const isSelected = record.key === selectedRecord?.key;
             const displayLatLng = pointOffsets.get(record.key) || group.baseLatLng;
-            const markerColor = record.isPlo ? PLO_COLOR : isSelected ? PANEL_ACTIVE_COLOR : PANEL_COLOR;
-            const marker = L.circleMarker(displayLatLng, {
-              radius: isSelected ? 9 : 7,
-              fillColor: markerColor,
-              color: "#ffffff",
-              weight: isSelected ? 2.5 : 1.5,
-              opacity: 1,
-              fillOpacity: 0.92,
+            const categoryKey = getPanelCategoryKey(record);
+            const categoryStyle: PanelCategoryStyle = record.isPlo
+              ? { key: "plo", label: "PLO", color: PLO_COLOR, iconKind: "service", emoji: "📮", symbolUrl: null }
+              : (panelCategoryStyles.get(categoryKey) ?? {
+                  key: categoryKey,
+                  label: categoryKey,
+                  color: PANEL_COLOR,
+                  iconKind: inferPanelCategoryIconKind(categoryKey),
+                  emoji: inferPanelCategoryEmoji(inferPanelCategoryIconKind(categoryKey)),
+                  symbolUrl: resolveCategorySymbolUrl(categoryKey),
+                });
+            const marker = L.marker(displayLatLng, {
+              icon: L.divIcon({
+                className: styles.mapSymbolMarkerWrap,
+                html: buildPanelMarkerHtml(categoryStyle, { selected: isSelected }),
+                iconSize: [isSelected ? 34 : 30, isSelected ? 34 : 30],
+                iconAnchor: [isSelected ? 17 : 15, isSelected ? 17 : 15],
+              }),
             });
             marker.bindTooltip(
               `${record.typePanneauCode !== "N/A" ? record.typePanneauCode : record.entityType} - ${record.title}`,
@@ -1309,7 +1480,7 @@ export function DashboardCeremap3D() {
         setHasAdjustedView(true);
       }
     }
-  }, [expandedSiteKey, filteredRecords, hasAdjustedView, layerVisibility, pointOffsets, selectedRecord, siteGroups]);
+  }, [expandedSiteKey, filteredRecords, hasAdjustedView, layerVisibility, panelCategoryStyles, pointOffsets, selectedRecord, siteGroups]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1677,6 +1848,21 @@ export function DashboardCeremap3D() {
                     <strong>{vitesseCount} vitesse, {depassementCount} depassement</strong>
                   </div>
                 </div>
+                {visiblePanelCategoryStyles.slice(0, 5).map(({ style, count }) => (
+                  <div key={style.key} className={styles.floatingLegendItem}>
+                    <span className={styles.floatingLegendSymbol}>
+                      {style.symbolUrl ? (
+                        <img src={style.symbolUrl} alt={style.label} className={styles.floatingLegendSymbolImage} />
+                      ) : (
+                        style.emoji
+                      )}
+                    </span>
+                    <div className={styles.floatingLegendContent}>
+                      <span className={styles.floatingLegendLabel}>{style.emoji} {style.label}</span>
+                      <strong>{count} panneau{count > 1 ? "x" : ""}</strong>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -1702,6 +1888,22 @@ export function DashboardCeremap3D() {
                 <span>{selectedRecord.title}</span>
                 <span>{selectedRecord.siteDisplayLabel}</span>
               </div>
+              {selectedRecord.sourceKind === "panel" && selectedRecord.imageUrl ? (
+                <div className={styles.panelImageCard}>
+                  <span className={styles.filterLabel}>Photo du panneau</span>
+                  <a href={selectedRecord.imageUrl} target="_blank" rel="noreferrer" className={styles.panelImageLink}>
+                    <img
+                      src={selectedRecord.imageUrl}
+                      alt={selectedRecord.title}
+                      className={styles.panelImage}
+                      loading="lazy"
+                    />
+                  </a>
+                  {selectedRecord.firstImagePath ? (
+                    <span className={styles.mutedSmall}>{selectedRecord.firstImagePath}</span>
+                  ) : null}
+                </div>
+              ) : null}
               <dl className={styles.panelInfoList}>
                 {detailItems.map((item) => (
                   <div key={item.label}>

@@ -13,7 +13,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .media_storage import build_internal_media_url, resolve_storage_path, store_uploaded_file
+from .media_storage import (
+    build_internal_file_url,
+    build_internal_media_url,
+    normalize_referenced_media_path,
+    resolve_referenced_media_path,
+    resolve_storage_path,
+    store_uploaded_file,
+)
 from .models import Dashboard, EntityTable, Environment, MediaAsset, SqlView
 from .security import user_environment_ids, user_is_global_admin
 
@@ -91,6 +98,15 @@ def _serialize_media_asset(asset: MediaAsset) -> dict:
         "updated_at": asset.updated_at,
         "environments": list(asset.environments.values_list("slug", flat=True)),
     }
+
+
+def _find_first_value(item: dict[str, object], aliases: tuple[str, ...]) -> object | None:
+    normalized_aliases = {"".join(ch for ch in alias.lower() if ch.isalnum()) for alias in aliases}
+    for key, value in item.items():
+        normalized_key = "".join(ch for ch in str(key).lower() if ch.isalnum())
+        if normalized_key in normalized_aliases:
+            return value
+    return None
 
 
 class EntityTableListView(APIView):
@@ -450,6 +466,97 @@ class MediaAssetFileView(APIView):
         if as_attachment:
             response["Content-Disposition"] = f'attachment; filename="{os.path.basename(asset.original_name)}"'
         return response
+
+
+class Ceremap3DPanelImageView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        dashboard = get_object_or_404(Dashboard.objects.select_related("sql_view").prefetch_related("environments"), slug="ceremap3d", is_active=True)
+        if not _can_access_dashboard(user=request.user, dashboard=dashboard):
+            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        raw_path = (request.query_params.get("path") or "").strip() or None
+        entity_id = (request.query_params.get("entity_id") or "").strip()
+
+        if not raw_path:
+            if not entity_id:
+                return Response({"detail": "Provide entity_id or path."}, status=status.HTTP_400_BAD_REQUEST)
+            if not dashboard.sql_view or not dashboard.sql_view.db_relation_name:
+                return Response({"detail": "Ceremap3D SQL view is not deployed."}, status=status.HTTP_400_BAD_REQUEST)
+
+            quoted_relation = _q(dashboard.sql_view.db_relation_name)
+            with connection.cursor() as cursor:
+                cursor.execute(f"SELECT * FROM {quoted_relation} WHERE entity_id = %s LIMIT 1", [entity_id])
+                row = cursor.fetchone()
+                columns = [desc[0] for desc in (cursor.description or [])]
+            if not row:
+                return Response({"detail": "Panneau not found in Ceremap3D view."}, status=status.HTTP_404_NOT_FOUND)
+
+            row_data = dict(zip(columns, row))
+            raw_path = _find_first_value(row_data, ("first_image_path", "imgpath", "image_path"))
+
+        normalized_path = normalize_referenced_media_path(raw_path)
+        if not normalized_path:
+            return Response({"detail": "No valid image path found for this panneau."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            _, file_path = resolve_referenced_media_path(settings.CEREMAP3D_IMAGE_ROOT, normalized_path)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not file_path.exists() or not file_path.is_file():
+            return Response({"detail": "Image file not found on server."}, status=status.HTTP_404_NOT_FOUND)
+
+        as_attachment = (request.query_params.get("download") or "").strip().lower() in {"1", "true", "yes"}
+        internal_prefix = (settings.CEREMAP3D_IMAGE_INTERNAL_URL_PREFIX or "").strip()
+        if internal_prefix:
+            response = HttpResponse()
+            response["Content-Type"] = "application/octet-stream"
+            response["Content-Length"] = str(file_path.stat().st_size)
+            disposition = "attachment" if as_attachment else "inline"
+            response["Content-Disposition"] = f'{disposition}; filename="{os.path.basename(file_path.name)}"'
+            response["X-Accel-Redirect"] = build_internal_file_url(normalized_path, internal_prefix)
+            return response
+
+        response = FileResponse(file_path.open("rb"))
+        if as_attachment:
+            response["Content-Disposition"] = f'attachment; filename="{os.path.basename(file_path.name)}"'
+        return response
+
+
+class Ceremap3DCategorySymbolView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        dashboard = get_object_or_404(Dashboard.objects.prefetch_related("environments"), slug="ceremap3d", is_active=True)
+        if not _can_access_dashboard(user=request.user, dashboard=dashboard):
+            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        category = (request.query_params.get("category") or "").strip()
+        if not category:
+            return Response({"detail": "Provide category."}, status=status.HTTP_400_BAD_REQUEST)
+
+        safe_category = normalize_referenced_media_path(f"Signalisation/{category}.png")
+        if not safe_category:
+            return Response({"detail": "Invalid category."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            _, file_path = resolve_referenced_media_path(settings.CEREMAP3D_IMAGE_ROOT, safe_category)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not file_path.exists() or not file_path.is_file():
+            return Response({"detail": "Symbol file not found on server."}, status=status.HTTP_404_NOT_FOUND)
+
+        internal_prefix = (settings.CEREMAP3D_IMAGE_INTERNAL_URL_PREFIX or "").strip()
+        if internal_prefix:
+            response = HttpResponse()
+            response["Content-Type"] = "image/png"
+            response["Content-Length"] = str(file_path.stat().st_size)
+            response["Content-Disposition"] = f'inline; filename="{os.path.basename(file_path.name)}"'
+            response["X-Accel-Redirect"] = build_internal_file_url(safe_category, internal_prefix)
+            return response
+
+        return FileResponse(file_path.open("rb"), content_type="image/png")
 
 
 class DashboardListView(APIView):
