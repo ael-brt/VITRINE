@@ -9,7 +9,7 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -525,12 +525,11 @@ class Ceremap3DPanelImageView(APIView):
 
 
 class Ceremap3DCategorySymbolView(APIView):
-    permission_classes = [IsAuthenticated]
+    authentication_classes = []
+    permission_classes = [AllowAny]
 
     def get(self, request):
-        dashboard = get_object_or_404(Dashboard.objects.prefetch_related("environments"), slug="ceremap3d", is_active=True)
-        if not _can_access_dashboard(user=request.user, dashboard=dashboard):
-            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+        get_object_or_404(Dashboard, slug="ceremap3d", is_active=True)
 
         category = (request.query_params.get("category") or "").strip()
         if not category:
