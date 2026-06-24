@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -107,6 +107,18 @@ type CeremapRecord = {
   siteDisplayLabel: string;
   isPlo: boolean;
 };
+
+type RecordDetailColumn = {
+  label: string;
+  getValue: (record: CeremapRecord) => string;
+};
+
+type TableSortDirection = "asc" | "desc";
+
+type TableSortState = {
+  label: string;
+  direction: TableSortDirection;
+} | null;
 
 type LayerVisibility = Record<LayerKey, boolean>;
 type MeasurePoint = { latlng: L.LatLng; label: string };
@@ -278,6 +290,68 @@ function formatDistance(valueInMeters: number | null): string {
 
 function formatSize(value: number | null): string {
   return value === null ? "N/A" : `${value.toFixed(2)} m`;
+}
+
+function getTypeActuelValue(record: CeremapRecord): string {
+  return record.typePanneauLabel !== "N/A"
+    ? record.typePanneauActuel !== "N/A"
+      ? `${record.typePanneauActuel} - ${record.typePanneauLabel}`
+      : record.typePanneauLabel
+    : record.typePanneauActuel;
+}
+
+const RECORD_DETAIL_COLUMNS: RecordDetailColumn[] = [
+  { label: "Entity ID", getValue: (record) => record.entityId },
+  { label: "Type d'entite", getValue: (record) => record.entityType },
+  { label: "Categorie", getValue: (record) => record.category },
+  { label: "Code panneau", getValue: (record) => record.typePanneauCode },
+  { label: "Description panneau", getValue: (record) => record.typePanneauLabel },
+  { label: "Type actuel", getValue: (record) => getTypeActuelValue(record) },
+  { label: "Type par decision", getValue: (record) => record.typePanneauParDecision },
+  { label: "Route", getValue: (record) => record.route },
+  { label: "Couloir", getValue: (record) => record.couloir },
+  { label: "Cote", getValue: (record) => record.cote },
+  { label: "Tenant", getValue: (record) => record.tenantId },
+  { label: "Scope", getValue: (record) => record.scope },
+  { label: "Largeur", getValue: (record) => formatSize(record.largeur) },
+  { label: "Hauteur", getValue: (record) => formatSize(record.hauteur) },
+  { label: "Emprise", getValue: (record) => record.typeEmprise },
+  { label: "Vehicule", getValue: (record) => record.vehicleType },
+  { label: "Abs PR Neg D", getValue: (record) => record.absPrNegD },
+  { label: "Abs PR Pos D", getValue: (record) => record.absPrPosD },
+  { label: "Decision", getValue: (record) => (record.hasDecision ? "Oui" : "Non") },
+  { label: "Presignalisation", getValue: (record) => (record.hasPresignalisation ? "Oui" : "Non") },
+  { label: "Localisation", getValue: (record) => record.siteDisplayLabel },
+  { label: "Derniere mise a jour", getValue: (record) => formatDateValue(record.updatedAt) },
+];
+
+function getRecordDetailItems(record: CeremapRecord): Array<{ label: string; value: string }> {
+  return RECORD_DETAIL_COLUMNS.map((column) => ({
+    label: column.label,
+    value: column.getValue(record),
+  }));
+}
+
+const tableSortCollator = new Intl.Collator("fr-FR", {
+  numeric: true,
+  sensitivity: "base",
+});
+
+function compareTableValues(left: string, right: string): number {
+  const normalizedLeft = left === "N/A" ? "" : left;
+  const normalizedRight = right === "N/A" ? "" : right;
+
+  if (!normalizedLeft && !normalizedRight) {
+    return 0;
+  }
+  if (!normalizedLeft) {
+    return 1;
+  }
+  if (!normalizedRight) {
+    return -1;
+  }
+
+  return tableSortCollator.compare(normalizedLeft, normalizedRight);
 }
 
 function resolveImageUrl(entityId: string, path: string | null): string | null {
@@ -540,7 +614,7 @@ function matchesRecordFilters(record: CeremapRecord, filters: FilterState, exclu
   if (excludeKey !== "catireveCategory" && filters.catireveCategory !== "all" && record.catireveCategory !== filters.catireveCategory) {
     return false;
   }
-  if (excludeKey !== "typePanneau" && filters.typePanneau !== "all" && record.typePanneauCode !== filters.typePanneau) {
+  if (excludeKey !== "typePanneau" && filters.typePanneau !== "all" && getPanelTypeFilterValue(record) !== filters.typePanneau) {
     return false;
   }
   if (excludeKey !== "gammePanneau" && filters.gammePanneau !== "all" && record.gammePanneau !== filters.gammePanneau) {
@@ -581,6 +655,13 @@ function matchesRecordFilters(record: CeremapRecord, filters: FilterState, exclu
 
 function getPanelCategoryKey(record: CeremapRecord): string {
   return record.catireveCategory !== "N/A" ? record.catireveCategory : record.category;
+}
+
+function getPanelTypeFilterValue(record: CeremapRecord): string {
+  if (record.typePanneauLabel && record.typePanneauLabel !== "N/A") {
+    return record.typePanneauLabel;
+  }
+  return record.typePanneauCode;
 }
 
 function inferPanelCategoryEmoji(iconKind: PanelCategoryIconKind): string {
@@ -790,6 +871,8 @@ export function DashboardCeremap3D() {
   const [measureMode, setMeasureMode] = useState(false);
   const [snapToPanels, setSnapToPanels] = useState(true);
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
+  const [measureVisible, setMeasureVisible] = useState(true);
+  const [tableSort, setTableSort] = useState<TableSortState>(null);
   const [expandedSiteKey, setExpandedSiteKey] = useState<string | null>(null);
   const [hasAdjustedView, setHasAdjustedView] = useState(false);
   const [basemap, setBasemap] = useState<BasemapKey>("orthophoto");
@@ -984,7 +1067,10 @@ export function DashboardCeremap3D() {
   );
 
   const availableCatireveCategories = useMemo(() => getFilterOptions(optionSourceRecords.catireveCategory, (record) => record.catireveCategory), [optionSourceRecords]);
-  const availableTypePanneaux = useMemo(() => getFilterOptions(optionSourceRecords.typePanneau, (record) => record.typePanneauCode), [optionSourceRecords]);
+  const availableTypePanneaux = useMemo(
+    () => getFilterOptions(optionSourceRecords.typePanneau, (record) => getPanelTypeFilterValue(record)),
+    [optionSourceRecords],
+  );
   const availableGammePanneaux = useMemo(() => getFilterOptions(optionSourceRecords.gammePanneau, (record) => record.gammePanneau), [optionSourceRecords]);
   const availablePositionPanneaux = useMemo(() => getFilterOptions(optionSourceRecords.positionPanneau, (record) => record.positionPanneau), [optionSourceRecords]);
   const availableRoutes = useMemo(() => getFilterOptions(optionSourceRecords.route, (record) => record.route), [optionSourceRecords]);
@@ -1029,31 +1115,6 @@ export function DashboardCeremap3D() {
     () => filteredRecords.filter((record) => record.sourceKind === "panel"),
     [filteredRecords],
   );
-  const visiblePanelCategoryStyles = useMemo(() => {
-    const counts = new Map<string, number>();
-    filteredPanelRecords.forEach((record) => {
-      const key = getPanelCategoryKey(record);
-      if (!key || key === "N/A") {
-        return;
-      }
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    });
-
-    return Array.from(counts.entries())
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "fr"))
-      .map(([key, count]) => ({
-        style: panelCategoryStyles.get(key) ?? {
-          key,
-          label: key,
-          color: PANEL_COLOR,
-          iconKind: inferPanelCategoryIconKind(key),
-          emoji: inferPanelCategoryEmoji(inferPanelCategoryIconKind(key)),
-          symbolUrl: resolveCategorySymbolUrl(key),
-        },
-        count,
-      }));
-  }, [filteredPanelRecords, panelCategoryStyles]);
-
   useEffect(() => {
     if (selectedCatireveCategory !== "all" && !availableCatireveCategories.includes(selectedCatireveCategory)) {
       setSelectedCatireveCategory("all");
@@ -1296,6 +1357,10 @@ export function DashboardCeremap3D() {
     }, 0);
   }, [measurePoints]);
 
+  const appendMeasurePoint = useCallback((latlng: L.LatLng) => {
+    setMeasurePoints((current) => [...current, { latlng, label: createMeasureLabel(current.length) }]);
+  }, []);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) {
@@ -1309,10 +1374,7 @@ export function DashboardCeremap3D() {
       const latlng = snapToPanels
         ? getNearestSnapPoint(map, event.latlng, filteredPanelRecords, pointOffsets)
         : event.latlng;
-
-      setMeasurePoints((current) => {
-        return [...current, { latlng, label: createMeasureLabel(current.length) }];
-      });
+      appendMeasurePoint(latlng);
     };
 
     map.on("click", handler);
@@ -1322,7 +1384,7 @@ export function DashboardCeremap3D() {
       map.off("click", handler);
       map.getContainer().style.cursor = "";
     };
-  }, [filteredPanelRecords, measureMode, pointOffsets, snapToPanels]);
+  }, [appendMeasurePoint, filteredPanelRecords, measureMode, pointOffsets, snapToPanels]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1386,6 +1448,10 @@ export function DashboardCeremap3D() {
               : `${representative.typePanneauCode !== "N/A" ? representative.typePanneauCode : representative.entityType} - ${representative.title}`;
           marker.bindTooltip(tooltipText, { direction: "top", offset: [0, -8] });
           marker.on("click", () => {
+            if (measureMode) {
+              appendMeasurePoint(group.baseLatLng);
+              return;
+            }
             setSelectedRecordKey(representative.key);
             if (visibleGroupRecords.length > 1) {
               setExpandedSiteKey(group.siteKey);
@@ -1423,6 +1489,10 @@ export function DashboardCeremap3D() {
               { direction: "top", offset: [0, -8] },
             );
             marker.on("click", () => {
+              if (measureMode) {
+                appendMeasurePoint(displayLatLng);
+                return;
+              }
               setSelectedRecordKey(record.key);
             });
             dataLayer.addLayer(marker);
@@ -1480,7 +1550,7 @@ export function DashboardCeremap3D() {
         setHasAdjustedView(true);
       }
     }
-  }, [expandedSiteKey, filteredRecords, hasAdjustedView, layerVisibility, panelCategoryStyles, pointOffsets, selectedRecord, siteGroups]);
+  }, [appendMeasurePoint, expandedSiteKey, filteredRecords, hasAdjustedView, layerVisibility, measureMode, panelCategoryStyles, pointOffsets, selectedRecord, siteGroups]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1554,31 +1624,36 @@ export function DashboardCeremap3D() {
     if (!selectedRecord) {
       return [];
     }
-    return [
-      { label: "Entity ID", value: selectedRecord.entityId },
-      { label: "Type d'entite", value: selectedRecord.entityType },
-      { label: "Categorie", value: selectedRecord.category },
-      { label: "Code panneau", value: selectedRecord.typePanneauCode },
-      { label: "Description panneau", value: selectedRecord.typePanneauLabel },
-      { label: "Type actuel", value: selectedRecord.typePanneauActuel },
-      { label: "Type par decision", value: selectedRecord.typePanneauParDecision },
-      { label: "Route", value: selectedRecord.route },
-      { label: "Couloir", value: selectedRecord.couloir },
-      { label: "Cote", value: selectedRecord.cote },
-      { label: "Tenant", value: selectedRecord.tenantId },
-      { label: "Scope", value: selectedRecord.scope },
-      { label: "Largeur", value: formatSize(selectedRecord.largeur) },
-      { label: "Hauteur", value: formatSize(selectedRecord.hauteur) },
-      { label: "Emprise", value: selectedRecord.typeEmprise },
-      { label: "Vehicule", value: selectedRecord.vehicleType },
-      { label: "Abs PR Neg D", value: selectedRecord.absPrNegD },
-      { label: "Abs PR Pos D", value: selectedRecord.absPrPosD },
-      { label: "Decision", value: selectedRecord.hasDecision ? "Oui" : "Non" },
-      { label: "Presignalisation", value: selectedRecord.hasPresignalisation ? "Oui" : "Non" },
-      { label: "Localisation", value: selectedRecord.siteDisplayLabel },
-      { label: "Derniere mise a jour", value: formatDateValue(selectedRecord.updatedAt) },
-    ];
+    return getRecordDetailItems(selectedRecord);
   }, [selectedRecord]);
+
+  const tableRows = useMemo(() => {
+    const records = [...filteredPanelRecords];
+
+    if (tableSort) {
+      const column = RECORD_DETAIL_COLUMNS.find((entry) => entry.label === tableSort.label);
+      if (column) {
+        records.sort((left, right) => {
+          const comparison = compareTableValues(column.getValue(left), column.getValue(right));
+          return tableSort.direction === "asc" ? comparison : -comparison;
+        });
+      }
+    }
+
+    return records.map((record) => ({
+      key: record.key,
+      items: getRecordDetailItems(record),
+    }));
+  }, [filteredPanelRecords, tableSort]);
+
+  const toggleTableSort = (label: string) => {
+    setTableSort((current) => {
+      if (!current || current.label !== label) {
+        return { label, direction: "asc" };
+      }
+      return { label, direction: current.direction === "asc" ? "desc" : "asc" };
+    });
+  };
 
   const toggleFilterSection = (section: FilterSectionKey) => {
     setFilterSections((current) => ({ ...current, [section]: !current[section] }));
@@ -1627,6 +1702,9 @@ export function DashboardCeremap3D() {
     : isStreaming
       ? `Chargement progressif en cours: ${loadedRows}/${totalRows ?? loadedRows} lignes.`
       : `Chargement termine: ${loadedRows}/${totalRows ?? loadedRows} lignes.`;
+  const loadingCardClassName = `${styles.headerInfoCard} ${
+    loading ? styles.headerInfoCardLoading : isStreaming ? styles.headerInfoCardStreaming : styles.headerInfoCardReady
+  }`;
 
   return (
     <div className={`container ${styles.page} ${styles.pageWide}`}>
@@ -1640,15 +1718,15 @@ export function DashboardCeremap3D() {
             </div>
           ) : null}
 
-          <div className={styles.sidebarToolbar}>
-            <button
-              className={styles.sidebarToggle}
-              onClick={() => setFiltersVisible((current) => !current)}
-              aria-expanded={filtersVisible}
-            >
-              {filtersVisible ? "Masquer les filtres" : "Ouvrir les filtres"}
-            </button>
-            {filtersVisible ? (
+          {filtersVisible ? (
+            <div className={styles.sidebarToolbar}>
+              <button
+                className={styles.sidebarToggle}
+                onClick={() => setFiltersVisible((current) => !current)}
+                aria-expanded={filtersVisible}
+              >
+                Masquer les filtres
+              </button>
               <button
                 className={styles.filterButton}
                 onClick={resetAllFilters}
@@ -1656,8 +1734,8 @@ export function DashboardCeremap3D() {
               >
                 Reinitialiser
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
 
           {filtersVisible ? (
             <>
@@ -1799,39 +1877,50 @@ export function DashboardCeremap3D() {
 
               <div id="ceremap3d-map" className={`${styles.map} ${styles.mapLarge}`} />
 
-              <div className={styles.mapBadgeSecondary}>
-                <span className={styles.mapBadgeLabel}>Mesure</span>
-                <div className={styles.measureControls}>
-                  <button
-                    className={measureMode ? styles.filterButtonActive : styles.filterButton}
-                    onClick={() => {
-                      setMeasureMode((current) => !current);
-                      setMeasurePoints([]);
-                    }}
-                  >
-                    {measureMode ? "Desactiver" : "Activer"}
-                  </button>
-                  <button
-                    className={snapToPanels ? styles.filterButtonActive : styles.filterButton}
-                    onClick={() => setSnapToPanels((current) => !current)}
-                  >
-                    Aimantation
-                  </button>
-                  <button className={styles.filterButton} onClick={() => setMeasurePoints([])}>
-                    Reinitialiser
-                  </button>
+              {measureVisible ? (
+                <div className={styles.mapBadgeSecondary}>
+                  <div className={styles.mapPanelHeader}>
+                    <span className={styles.mapBadgeLabel}>Mesure</span>
+                    <button className={styles.mapPanelToggle} onClick={() => setMeasureVisible(false)}>
+                      Masquer
+                    </button>
+                  </div>
+                  <div className={styles.measureControls}>
+                    <button
+                      className={measureMode ? styles.filterButtonActive : styles.filterButton}
+                      onClick={() => {
+                        setMeasureMode((current) => !current);
+                        setMeasurePoints([]);
+                      }}
+                    >
+                      {measureMode ? "Desactiver" : "Activer"}
+                    </button>
+                    <button
+                      className={snapToPanels ? styles.filterButtonActive : styles.filterButton}
+                      onClick={() => setSnapToPanels((current) => !current)}
+                    >
+                      Aimantation
+                    </button>
+                    <button className={styles.filterButton} onClick={() => setMeasurePoints([])}>
+                      Reinitialiser
+                    </button>
+                  </div>
+                  <div className={styles.mapBadgeMeta}>
+                    {measureMode
+                      ? "Cliquez sur plusieurs points pour mesurer la distance totale a vol d'oiseau."
+                      : "Mode de mesure inactif."}
+                  </div>
+                  <strong>
+                    {measureDistance === null
+                      ? "Aucune mesure"
+                      : `${formatDistance(measureDistance)}${measurePoints.length > 0 ? ` · ${measurePoints.length} points` : ""}`}
+                  </strong>
                 </div>
-                <div className={styles.mapBadgeMeta}>
-                  {measureMode
-                    ? "Cliquez sur plusieurs points pour mesurer la distance totale a vol d'oiseau."
-                    : "Mode de mesure inactif."}
-                </div>
-                <strong>
-                  {measureDistance === null
-                    ? "Aucune mesure"
-                    : `${formatDistance(measureDistance)}${measurePoints.length > 0 ? ` · ${measurePoints.length} points` : ""}`}
-                </strong>
-              </div>
+              ) : (
+                <button className={styles.mapMeasureHandle} onClick={() => setMeasureVisible(true)}>
+                  Ouvrir la mesure
+                </button>
+              )}
 
               <div className={styles.floatingLegend}>
                 <div className={styles.floatingLegendItem}>
@@ -1848,21 +1937,6 @@ export function DashboardCeremap3D() {
                     <strong>{vitesseCount} vitesse, {depassementCount} depassement</strong>
                   </div>
                 </div>
-                {visiblePanelCategoryStyles.slice(0, 5).map(({ style, count }) => (
-                  <div key={style.key} className={styles.floatingLegendItem}>
-                    <span className={styles.floatingLegendSymbol}>
-                      {style.symbolUrl ? (
-                        <img src={style.symbolUrl} alt={style.label} className={styles.floatingLegendSymbolImage} />
-                      ) : (
-                        style.emoji
-                      )}
-                    </span>
-                    <div className={styles.floatingLegendContent}>
-                      <span className={styles.floatingLegendLabel}>{style.emoji} {style.label}</span>
-                      <strong>{count} panneau{count > 1 ? "x" : ""}</strong>
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           </div>
@@ -1870,9 +1944,21 @@ export function DashboardCeremap3D() {
 
         <aside className={`${styles.sidePanel} ${styles.sidePanelDocked}`}>
           <div className={styles.sidePanelHeader}>
-            <div className={styles.headerInfoCard}>
+            <div className={loadingCardClassName}>
               <span className={styles.filterLabel}>Etat du chargement</span>
-              <strong>{loading ? "Initialisation" : isStreaming ? "Streaming" : "Pret"}</strong>
+              <div className={styles.headerInfoStatusRow}>
+                <span
+                  className={
+                    loading
+                      ? styles.headerInfoSpinner
+                      : isStreaming
+                        ? styles.headerInfoPulse
+                        : styles.headerInfoCheck
+                  }
+                  aria-hidden="true"
+                />
+                <strong>{loading ? "Initialisation" : isStreaming ? "Streaming" : "Pret"}</strong>
+              </div>
               <span className={styles.mutedSmall}>{loadingStatus}</span>
             </div>
             <button className={styles.back} onClick={() => navigate("/dashboardhome")}>
@@ -1974,6 +2060,53 @@ export function DashboardCeremap3D() {
           </div>
         </aside>
       </div>
+
+      <section className={styles.recordsTableSection}>
+        <div className={styles.recordsTableHeader}>
+          <div>
+            <span className={styles.filterLabel}>Table des panneaux</span>
+            <h3 className={styles.recordsTableTitle}>Panneaux visibles selon les filtres</h3>
+          </div>
+          <span className={styles.recordsTableCount}>{filteredPanelRecords.length} lignes</span>
+        </div>
+
+        <div className={styles.recordsTableWrap}>
+          <table className={styles.recordsTable}>
+            <thead>
+              <tr>
+                {RECORD_DETAIL_COLUMNS.map((column) => (
+                  <th key={column.label}>
+                    <button
+                      type="button"
+                      className={styles.recordsTableSortButton}
+                      onClick={() => toggleTableSort(column.label)}
+                    >
+                      <span>{column.label}</span>
+                      <span className={styles.recordsTableSortIndicator}>
+                        {tableSort?.label === column.label ? (tableSort.direction === "asc" ? "↑" : "↓") : "↕"}
+                      </span>
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.map((row) => (
+                <tr
+                  key={row.key}
+                  className={row.key === selectedRecord?.key ? styles.recordsTableRowActive : ""}
+                  onClick={() => setSelectedRecordKey(row.key)}
+                >
+                  {row.items.map((item) => (
+                    <td key={`${row.key}-${item.label}`}>{item.value}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {tableRows.length === 0 ? <p className={styles.mutedSmall}>Aucun panneau visible avec les filtres actifs.</p> : null}
+        </div>
+      </section>
 
       <div className={styles.footerNotes}>
         <p className={styles.footerHint}>
