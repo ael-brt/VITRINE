@@ -284,3 +284,77 @@ class Ceremap3DReferencedImageTests(TestCase):
             {"path": "photos/panneaux/panneau-1.jpg"},
         )
         self.assertEqual(response.status_code, 403)
+
+
+class DashboardRowsAccessTests(TestCase):
+    relation_name = "test_ceremap3d_dashboard_rows"
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.allowed_user = user_model.objects.create_user(username="dashboard-user", password="demo-pass")
+        self.denied_user = user_model.objects.create_user(username="dashboard-other", password="demo-pass")
+
+        dashboard_environment = Environment.objects.create(slug="dashboard-env", name="Dashboard environment")
+        other_environment = Environment.objects.create(slug="other-env", name="Other environment")
+
+        allowed_group = EnvironmentAccessGroup.objects.create(name="Ceremap3D dashboard readers")
+        allowed_group.users.add(self.allowed_user)
+        allowed_group.environments.add(dashboard_environment)
+
+        denied_group = EnvironmentAccessGroup.objects.create(name="Other dashboard readers")
+        denied_group.users.add(self.denied_user)
+        denied_group.environments.add(other_environment)
+
+        # The mismatch reproduces the original bug: dashboard access was
+        # granted, while the direct SQL-view endpoint returned 403.
+        sql_view = SqlView.objects.create(
+            slug="ceremap3d-test-view",
+            name="Ceremap3D test view",
+            sql_query=f"SELECT * FROM {self.relation_name}",
+            db_relation_name=self.relation_name,
+        )
+        sql_view.environments.add(other_environment)
+
+        dashboard = Dashboard.objects.create(
+            slug="ceremap3d",
+            title="Ceremap3D",
+            is_protected=True,
+            sql_view=sql_view,
+        )
+        dashboard.environments.add(dashboard_environment)
+
+        self.client = APIClient()
+
+        quoted = connection.ops.quote_name(self.relation_name)
+        with connection.cursor() as cursor:
+            cursor.execute(f"CREATE TABLE {quoted} (entity_id varchar(100), geometry text)")
+            cursor.execute(
+                f"INSERT INTO {quoted} (entity_id, geometry) VALUES (%s, %s)",
+                ["panel-1", '{"type":"Point","coordinates":[2.0,48.0]}'],
+            )
+
+    def tearDown(self):
+        quoted = connection.ops.quote_name(self.relation_name)
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP TABLE IF EXISTS {quoted}")
+        super().tearDown()
+
+    def test_dashboard_member_can_read_rows_despite_sql_view_environment_mismatch(self):
+        self.client.force_authenticate(user=self.allowed_user)
+
+        direct_view_response = self.client.get(
+            reverse("datahub-sqlview-rows", args=["ceremap3d-test-view"])
+        )
+        response = self.client.get(reverse("dashboards-rows", args=["ceremap3d"]))
+
+        self.assertEqual(direct_view_response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total_rows"], 1)
+        self.assertEqual(response.data["items"][0]["entity_id"], "panel-1")
+
+    def test_user_without_dashboard_environment_cannot_read_rows(self):
+        self.client.force_authenticate(user=self.denied_user)
+
+        response = self.client.get(reverse("dashboards-rows", args=["ceremap3d"]))
+
+        self.assertEqual(response.status_code, 403)

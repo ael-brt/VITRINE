@@ -624,6 +624,58 @@ class DashboardDataView(APIView):
         )
 
 
+class DashboardRowsView(APIView):
+    """Expose a dashboard's SQL rows using the dashboard access policy."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, slug: str):
+        dashboard = get_object_or_404(
+            Dashboard.objects.select_related("sql_view").prefetch_related("environments"),
+            slug=slug,
+            is_active=True,
+        )
+        if not _can_access_dashboard(user=request.user, dashboard=dashboard):
+            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        sql_view = dashboard.sql_view
+        if not sql_view or not sql_view.is_active or not sql_view.db_relation_name:
+            return Response(
+                {"detail": "Dashboard SQL view is not available."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            page = max(1, int(request.query_params.get("page", "1")))
+            page_size = max(1, min(int(request.query_params.get("page_size", "100")), 1000))
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "Invalid pagination parameters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        offset = (page - 1) * page_size
+        quoted = _q(sql_view.db_relation_name)
+        with connection.cursor() as cursor:
+            cursor.execute(f"SELECT COUNT(*) FROM {quoted}")
+            total = int(cursor.fetchone()[0] or 0)
+            cursor.execute(f"SELECT * FROM {quoted} LIMIT %s OFFSET %s", [page_size, offset])
+            columns = [desc[0] for desc in (cursor.description or [])]
+            rows = [dict(zip(columns, result)) for result in cursor.fetchall()]
+
+        return Response(
+            {
+                "dashboard_slug": dashboard.slug,
+                "sql_view_slug": sql_view.slug,
+                "relation": sql_view.db_relation_name,
+                "page": page,
+                "page_size": page_size,
+                "total_rows": total,
+                "items": rows,
+            }
+        )
+
+
 class DashboardKpisView(APIView):
     permission_classes = [IsAuthenticated]
 

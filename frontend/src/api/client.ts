@@ -370,3 +370,39 @@ export async function fetchSqlViewRows<T = Record<string, unknown>>(
     items: payload.items ?? [],
   };
 }
+
+export async function fetchDashboardRows<T = Record<string, unknown>>(
+  slug: string,
+  params: { page?: number; pageSize?: number } = {},
+): Promise<{
+  dashboardSlug: string;
+  sqlViewSlug: string;
+  relation: string;
+  page: number;
+  pageSize: number;
+  totalRows: number;
+  items: T[];
+}> {
+  const query = buildQuery({
+    page: params.page,
+    page_size: params.pageSize,
+  });
+  const payload = await fetchJson<{
+    dashboard_slug: string;
+    sql_view_slug: string;
+    relation: string;
+    page: number;
+    page_size: number;
+    total_rows: number;
+    items: T[];
+  }>(`/dashboards/${slug}/rows/${query}`);
+  return {
+    dashboardSlug: payload.dashboard_slug,
+    sqlViewSlug: payload.sql_view_slug,
+    relation: payload.relation,
+    page: payload.page,
+    pageSize: payload.page_size,
+    totalRows: payload.total_rows,
+    items: payload.items ?? [],
+  };
+}

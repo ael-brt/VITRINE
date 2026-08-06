@@ -2,23 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { fetchDashboardBySlug, fetchSqlViewRows } from "../api/client";
+import { fetchDashboardBySlug, fetchDashboardRows } from "../api/client";
 import styles from "./Dashboard.module.css";
 
 const DEFAULT_TITLE = "Dashboard ceremap3d";
 const DEFAULT_DESCRIPTION =
   "Grande carte multicouches pour explorer les panneaux, les emprises et les informations associees issues de Ceremap3D.";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL?.trim() || "/api/v1").replace(/\/+$/, "");
-
-const SQL_VIEW_SLUG_CANDIDATES = Array.from(
-  new Set(
-    [
-      (import.meta.env.VITE_CEREMAP3D_SQLVIEW_SLUG as string | undefined)?.trim(),
-      "CEREMAP3D_total_query",
-      "ceremap3d_total_query",
-    ].filter((value): value is string => Boolean(value)),
-  ),
-);
 
 const MEDIA_BASE_URL = (
   (import.meta.env.VITE_CEREMAP3D_MEDIA_BASE_URL as string | undefined)?.trim() ||
@@ -778,19 +768,15 @@ function getNearestSnapPoint(map: L.Map, clickLatLng: L.LatLng, records: Ceremap
 
 async function fetchCeremap3DRowsPage(
   page: number,
-): Promise<{ slug: string; totalRows: number; features: DashboardFeature[] }> {
-  let lastError: Error | null = null;
-
-  for (const slug of SQL_VIEW_SLUG_CANDIDATES) {
-    try {
-      const data = await fetchSqlViewRows<FeatureProperties>(slug, { page, pageSize: SQL_VIEW_PAGE_SIZE });
-      return { slug, totalRows: data.totalRows, features: data.items.map((item) => rowToFeature(item)) };
-    } catch (caughtError) {
-      lastError = caughtError instanceof Error ? caughtError : new Error("Echec de chargement de la SQL view.");
-    }
-  }
-
-  throw lastError ?? new Error("Aucune SQL view Ceremap3D disponible.");
+): Promise<{ totalRows: number; features: DashboardFeature[] }> {
+  const data = await fetchDashboardRows<FeatureProperties>("ceremap3d", {
+    page,
+    pageSize: SQL_VIEW_PAGE_SIZE,
+  });
+  return {
+    totalRows: data.totalRows,
+    features: data.items.map((item) => rowToFeature(item)),
+  };
 }
 
 function getEmpriseDescription(record: CeremapRecord): string {
