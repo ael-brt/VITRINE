@@ -42,16 +42,6 @@ def _parse_geojson(value):
     return None
 
 
-def _can_access_sql_view(*, user, sql_view: SqlView) -> bool:
-    env_ids = user_environment_ids(user)
-    if not sql_view.is_active:
-        return False
-    view_env_ids = set(sql_view.environments.values_list("id", flat=True))
-    if not view_env_ids:
-        return True
-    return bool(env_ids.intersection(view_env_ids))
-
-
 def _can_access_dashboard(*, user, dashboard: Dashboard) -> bool:
     env_ids = user_environment_ids(user)
     dashboard_env_ids = set(dashboard.environments.values_list("id", flat=True))
@@ -60,30 +50,36 @@ def _can_access_dashboard(*, user, dashboard: Dashboard) -> bool:
     return True
 
 
-def _dashboard_sql_view(dashboard: Dashboard) -> SqlView | None:
-    """Resolve the configured view, with legacy Ceremap3D compatibility."""
-
-    linked_view = dashboard.sql_view if dashboard.sql_view_id else None
-    if linked_view and linked_view.is_active and linked_view.db_relation_name:
-        return linked_view
-    if dashboard.slug != "ceremap3d":
-        return linked_view
-
+def _ceremap3d_sql_view_slugs() -> set[str]:
     configured_slug = str(getattr(settings, "CEREMAP3D_SQL_VIEW_SLUG", "") or "").strip()
-    candidates = dict.fromkeys(
+    return {
         slug
         for slug in (configured_slug, "CEREMAP3D_total_query", "ceremap3d_total_query")
         if slug
-    )
-    for candidate in candidates:
-        sql_view = (
-            SqlView.objects.filter(slug=candidate, is_active=True)
-            .exclude(db_relation_name="")
+    }
+
+
+def _can_access_sql_view(*, user, sql_view: SqlView) -> bool:
+    env_ids = user_environment_ids(user)
+    if not sql_view.is_active:
+        return False
+    view_env_ids = set(sql_view.environments.values_list("id", flat=True))
+    if not view_env_ids or env_ids.intersection(view_env_ids):
+        return True
+
+    # Ceremap3D historically addresses its SQL view by slug rather than by the
+    # optional Dashboard.sql_view relation. Its data must therefore inherit
+    # the dashboard permission even when both environment lists differ.
+    if sql_view.slug in _ceremap3d_sql_view_slugs():
+        dashboard = (
+            Dashboard.objects.filter(slug="ceremap3d", is_active=True)
+            .prefetch_related("environments")
             .first()
         )
-        if sql_view:
-            return sql_view
-    return linked_view
+        if dashboard and _can_access_dashboard(user=user, dashboard=dashboard):
+            return True
+
+    return False
 
 
 def _can_access_media_asset(*, user, asset: MediaAsset) -> bool:
@@ -646,58 +642,6 @@ class DashboardDataView(APIView):
                 "total_entities": total,
                 "stats": {"line_count": total, "point_count": 0, "unknown_geometry_count": 0},
                 "sample_ids": [],
-            }
-        )
-
-
-class DashboardRowsView(APIView):
-    """Expose a dashboard's SQL rows using the dashboard access policy."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request, slug: str):
-        dashboard = get_object_or_404(
-            Dashboard.objects.select_related("sql_view").prefetch_related("environments"),
-            slug=slug,
-            is_active=True,
-        )
-        if not _can_access_dashboard(user=request.user, dashboard=dashboard):
-            return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
-
-        sql_view = _dashboard_sql_view(dashboard)
-        if not sql_view or not sql_view.is_active or not sql_view.db_relation_name:
-            return Response(
-                {"detail": "Dashboard SQL view is not available."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            page = max(1, int(request.query_params.get("page", "1")))
-            page_size = max(1, min(int(request.query_params.get("page_size", "100")), 1000))
-        except (TypeError, ValueError):
-            return Response(
-                {"detail": "Invalid pagination parameters."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        offset = (page - 1) * page_size
-        quoted = _q(sql_view.db_relation_name)
-        with connection.cursor() as cursor:
-            cursor.execute(f"SELECT COUNT(*) FROM {quoted}")
-            total = int(cursor.fetchone()[0] or 0)
-            cursor.execute(f"SELECT * FROM {quoted} LIMIT %s OFFSET %s", [page_size, offset])
-            columns = [desc[0] for desc in (cursor.description or [])]
-            rows = [dict(zip(columns, result)) for result in cursor.fetchall()]
-
-        return Response(
-            {
-                "dashboard_slug": dashboard.slug,
-                "sql_view_slug": sql_view.slug,
-                "relation": sql_view.db_relation_name,
-                "page": page,
-                "page_size": page_size,
-                "total_rows": total,
-                "items": rows,
             }
         )
 

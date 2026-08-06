@@ -235,7 +235,6 @@ Endpoints utilisés par le frontend :
 GET /api/v1/dashboards/
 GET /api/v1/dashboards/<slug>/
 GET /api/v1/dashboards/<slug>/data/
-GET /api/v1/dashboards/<slug>/rows/
 GET /api/v1/dashboards/<slug>/kpis/
 GET /api/v1/dashboards/<slug>/joined/
 GET /api/v1/dashboards/<slug>/map/

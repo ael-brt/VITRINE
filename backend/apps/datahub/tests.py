@@ -286,13 +286,18 @@ class Ceremap3DReferencedImageTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
-class DashboardRowsAccessTests(TestCase):
+class Ceremap3DSqlViewAccessTests(TestCase):
     relation_name = "test_ceremap3d_dashboard_rows"
 
     def setUp(self):
         user_model = get_user_model()
         self.allowed_user = user_model.objects.create_user(username="dashboard-user", password="demo-pass")
         self.denied_user = user_model.objects.create_user(username="dashboard-other", password="demo-pass")
+        self.admin_user = user_model.objects.create_superuser(
+            username="dashboard-admin",
+            email="dashboard-admin@example.com",
+            password="demo-pass",
+        )
 
         dashboard_environment = Environment.objects.create(slug="dashboard-env", name="Dashboard environment")
         other_environment = Environment.objects.create(slug="other-env", name="Other environment")
@@ -305,8 +310,8 @@ class DashboardRowsAccessTests(TestCase):
         denied_group.users.add(self.denied_user)
         denied_group.environments.add(other_environment)
 
-        # The mismatch reproduces the original bug: dashboard access was
-        # granted, while the direct SQL-view endpoint returned 403.
+        # The mismatch reproduces the original bug: the user can access the
+        # dashboard but not the SQL view used by the Ceremap3D frontend.
         self.sql_view = SqlView.objects.create(
             slug="CEREMAP3D_total_query",
             name="Ceremap3D test view",
@@ -319,7 +324,6 @@ class DashboardRowsAccessTests(TestCase):
             slug="ceremap3d",
             title="Ceremap3D",
             is_protected=True,
-            sql_view=self.sql_view,
         )
         self.dashboard.environments.add(dashboard_environment)
 
@@ -339,33 +343,32 @@ class DashboardRowsAccessTests(TestCase):
             cursor.execute(f"DROP TABLE IF EXISTS {quoted}")
         super().tearDown()
 
-    def test_dashboard_member_can_read_rows_despite_sql_view_environment_mismatch(self):
+    def test_dashboard_member_can_read_ceremap3d_sql_view_despite_environment_mismatch(self):
         self.client.force_authenticate(user=self.allowed_user)
 
-        direct_view_response = self.client.get(
+        response = self.client.get(
             reverse("datahub-sqlview-rows", args=["CEREMAP3D_total_query"])
         )
-        response = self.client.get(reverse("dashboards-rows", args=["ceremap3d"]))
 
-        self.assertEqual(direct_view_response.status_code, 403)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["total_rows"], 1)
         self.assertEqual(response.data["items"][0]["entity_id"], "panel-1")
 
-    def test_ceremap3d_rows_use_legacy_view_when_dashboard_has_no_explicit_view(self):
-        self.dashboard.sql_view = None
-        self.dashboard.save(update_fields=["sql_view"])
-        self.client.force_authenticate(user=self.allowed_user)
+    def test_admin_can_read_ceremap3d_sql_view(self):
+        self.client.force_authenticate(user=self.admin_user)
 
-        response = self.client.get(reverse("dashboards-rows", args=["ceremap3d"]))
+        response = self.client.get(
+            reverse("datahub-sqlview-rows", args=["CEREMAP3D_total_query"])
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["sql_view_slug"], "CEREMAP3D_total_query")
         self.assertEqual(response.data["items"][0]["entity_id"], "panel-1")
 
-    def test_user_without_dashboard_environment_cannot_read_rows(self):
+    def test_user_without_dashboard_environment_cannot_read_ceremap3d_sql_view(self):
         self.client.force_authenticate(user=self.denied_user)
 
-        response = self.client.get(reverse("dashboards-rows", args=["ceremap3d"]))
+        response = self.client.get(
+            reverse("datahub-sqlview-rows", args=["CEREMAP3D_total_query"])
+        )
 
         self.assertEqual(response.status_code, 403)
