@@ -307,21 +307,21 @@ class DashboardRowsAccessTests(TestCase):
 
         # The mismatch reproduces the original bug: dashboard access was
         # granted, while the direct SQL-view endpoint returned 403.
-        sql_view = SqlView.objects.create(
-            slug="ceremap3d-test-view",
+        self.sql_view = SqlView.objects.create(
+            slug="CEREMAP3D_total_query",
             name="Ceremap3D test view",
             sql_query=f"SELECT * FROM {self.relation_name}",
             db_relation_name=self.relation_name,
         )
-        sql_view.environments.add(other_environment)
+        self.sql_view.environments.add(other_environment)
 
-        dashboard = Dashboard.objects.create(
+        self.dashboard = Dashboard.objects.create(
             slug="ceremap3d",
             title="Ceremap3D",
             is_protected=True,
-            sql_view=sql_view,
+            sql_view=self.sql_view,
         )
-        dashboard.environments.add(dashboard_environment)
+        self.dashboard.environments.add(dashboard_environment)
 
         self.client = APIClient()
 
@@ -343,13 +343,24 @@ class DashboardRowsAccessTests(TestCase):
         self.client.force_authenticate(user=self.allowed_user)
 
         direct_view_response = self.client.get(
-            reverse("datahub-sqlview-rows", args=["ceremap3d-test-view"])
+            reverse("datahub-sqlview-rows", args=["CEREMAP3D_total_query"])
         )
         response = self.client.get(reverse("dashboards-rows", args=["ceremap3d"]))
 
         self.assertEqual(direct_view_response.status_code, 403)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["total_rows"], 1)
+        self.assertEqual(response.data["items"][0]["entity_id"], "panel-1")
+
+    def test_ceremap3d_rows_use_legacy_view_when_dashboard_has_no_explicit_view(self):
+        self.dashboard.sql_view = None
+        self.dashboard.save(update_fields=["sql_view"])
+        self.client.force_authenticate(user=self.allowed_user)
+
+        response = self.client.get(reverse("dashboards-rows", args=["ceremap3d"]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["sql_view_slug"], "CEREMAP3D_total_query")
         self.assertEqual(response.data["items"][0]["entity_id"], "panel-1")
 
     def test_user_without_dashboard_environment_cannot_read_rows(self):

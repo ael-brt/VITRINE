@@ -60,6 +60,32 @@ def _can_access_dashboard(*, user, dashboard: Dashboard) -> bool:
     return True
 
 
+def _dashboard_sql_view(dashboard: Dashboard) -> SqlView | None:
+    """Resolve the configured view, with legacy Ceremap3D compatibility."""
+
+    linked_view = dashboard.sql_view if dashboard.sql_view_id else None
+    if linked_view and linked_view.is_active and linked_view.db_relation_name:
+        return linked_view
+    if dashboard.slug != "ceremap3d":
+        return linked_view
+
+    configured_slug = str(getattr(settings, "CEREMAP3D_SQL_VIEW_SLUG", "") or "").strip()
+    candidates = dict.fromkeys(
+        slug
+        for slug in (configured_slug, "CEREMAP3D_total_query", "ceremap3d_total_query")
+        if slug
+    )
+    for candidate in candidates:
+        sql_view = (
+            SqlView.objects.filter(slug=candidate, is_active=True)
+            .exclude(db_relation_name="")
+            .first()
+        )
+        if sql_view:
+            return sql_view
+    return linked_view
+
+
 def _can_access_media_asset(*, user, asset: MediaAsset) -> bool:
     if asset.is_public:
         return True
@@ -638,7 +664,7 @@ class DashboardRowsView(APIView):
         if not _can_access_dashboard(user=request.user, dashboard=dashboard):
             return Response({"detail": "Access denied."}, status=status.HTTP_403_FORBIDDEN)
 
-        sql_view = dashboard.sql_view
+        sql_view = _dashboard_sql_view(dashboard)
         if not sql_view or not sql_view.is_active or not sql_view.db_relation_name:
             return Response(
                 {"detail": "Dashboard SQL view is not available."},

@@ -103,6 +103,7 @@ MEDIA_INTERNAL_URL_PREFIX = os.getenv("MEDIA_INTERNAL_URL_PREFIX", "/protected-m
 MEDIA_UPLOAD_MAX_BYTES = int(os.getenv("MEDIA_UPLOAD_MAX_BYTES", "104857600"))
 CEREMAP3D_IMAGE_ROOT = os.getenv("CEREMAP3D_IMAGE_ROOT", str(Path(MEDIA_STORAGE_ROOT) / "ceremap3d-images"))
 CEREMAP3D_IMAGE_INTERNAL_URL_PREFIX = os.getenv("CEREMAP3D_IMAGE_INTERNAL_URL_PREFIX", "")
+CEREMAP3D_SQL_VIEW_SLUG = os.getenv("CEREMAP3D_SQL_VIEW_SLUG", "CEREMAP3D_total_query")
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
